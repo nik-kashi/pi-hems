@@ -9,6 +9,7 @@ ssh "$HOST" 'mkdir -p /opt/hems /etc/hems'
 scp -q hems/*.py "$HOST":/opt/hems/
 scp -q systemd/*.service "$HOST":/etc/systemd/system/
 scp -q bin/* "$HOST":/usr/local/bin/
+scp -q tools/*.py "$HOST":/opt/hems/
 ssh "$HOST" '
   chmod +x /opt/hems/logger.py /opt/hems/report.py /opt/hems/planner.py /opt/hems/executor.py
   ln -sf /opt/hems/report.py /usr/local/bin/hems-report

@@ -3,32 +3,64 @@
 
 Drawn on a 320x480 portrait canvas, rotated 90 deg clockwise onto the panel.
 Dims automatically between sunset and sunrise.
+
+Layout (design "A", see docs/screenshot.png):
+  header      HEMS · time (centre) · weather (right)
+  2x2 tiles   Solar | Grid / Battery | Home, with energy-flow arrows between them
+  price       current price, today+tomorrow 15-min chart coloured by plan, legend
+  plan        current mode, next change, expected saving
+  resources   CPU (+temp) / RAM / Disk bars
 """
-import math, os, time
+import json
+import math
+import os
+import time
 from datetime import datetime, timedelta, timezone
+
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
-import json
+
 import devices
 import tibber
+import weather
+from config import LAT, LON
 
 # ---- settings -------------------------------------------------------------
 FBDEV = "/dev/fb1"
-from config import LAT, LON
 NIGHT_LEVEL = 0.25            # brightness factor at night (0..1)
 REFRESH_S = 2
 ROTATE = Image.Transpose.ROTATE_270   # = 90 deg clockwise; use ROTATE_90 to flip
+STALE_S = 15
+FLOW_MIN_W = 15               # flows below this are drawn as idle
+PLAN_FILE = "/run/hems/plan.json"
 # ---------------------------------------------------------------------------
 
 W, H = 320, 480
 FR = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 FB = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-f_big, f_mid, f_sm, f_xs = (ImageFont.truetype(FB, 34), ImageFont.truetype(FB, 20),
-                           ImageFont.truetype(FR, 15), ImageFont.truetype(FR, 12))
-BG, TILE, FG, MUTED = (12, 16, 24), (26, 32, 46), (240, 240, 240), (140, 150, 170)
-BLUE, YELLOW, GREEN, PURPLE = (90, 160, 255), (255, 200, 60), (80, 210, 120), (220, 120, 220)
+_f = {}
 
 
+def font(size, bold=False):
+    key = (size, bold)
+    if key not in _f:
+        _f[key] = ImageFont.truetype(FB if bold else FR, size)
+    return _f[key]
+
+
+BG, TILE, FG, MUTED, LINE = (12, 16, 24), (26, 32, 46), (240, 240, 240), (140, 150, 170), (38, 45, 61)
+YELLOW, BLUE, GREEN, WHITE, PURPLE = (255, 200, 60), (90, 160, 255), (80, 210, 120), (223, 228, 238), (220, 120, 220)
+RED = (255, 120, 100)
+MODE_COL = {"CHARGE": (80, 210, 120), "DISCHARGE": (255, 150, 60), "BYPASS": (150, 160, 180)}
+CHART_COL = {"CHARGE": (64, 168, 96), "DISCHARGE": (204, 120, 48), "BYPASS": (120, 70, 125),
+             "past": (75, 50, 80), "now": (255, 235, 255)}
+
+# tile boxes (x, y) top-left, 116 x 92
+TW, TH = 116, 92
+POS = {"solar": (12, 44), "grid": (192, 44), "battery": (12, 180), "home": (192, 180)}
+
+
+# ---- sun / night ------------------------------------------------------------
 def sun_times(day: datetime, lat=LAT, lon=LON):
     """Sunrise/sunset in UTC hours (NOAA approximation, good to a few minutes)."""
     n = day.timetuple().tm_yday
@@ -40,9 +72,7 @@ def sun_times(day: datetime, lat=LAT, lon=LON):
     la = math.radians(lat)
     cos_ha = (math.cos(math.radians(90.833)) - math.sin(la) * math.sin(decl)) / (math.cos(la) * math.cos(decl))
     ha = math.degrees(math.acos(max(-1, min(1, cos_ha))))
-    rise = (720 - 4 * (lon + ha) - eqt) / 60
-    sett = (720 - 4 * (lon - ha) - eqt) / 60
-    return rise, sett
+    return (720 - 4 * (lon + ha) - eqt) / 60, (720 - 4 * (lon - ha) - eqt) / 60
 
 
 def is_night(now_utc: datetime) -> bool:
@@ -51,16 +81,16 @@ def is_night(now_utc: datetime) -> bool:
     return not (rise <= h <= sett)
 
 
+# ---- resources --------------------------------------------------------------
 class Res:
-    """Tiny CPU / RAM / temperature sampler."""
+    """Tiny CPU / RAM / disk / temperature sampler."""
     def __init__(self):
         self.prev = self._cpu()
 
     @staticmethod
     def _cpu():
         v = list(map(int, open("/proc/stat").readline().split()[1:]))
-        idle = v[3] + v[4]
-        return idle, sum(v)
+        return v[3] + v[4], sum(v)
 
     def sample(self):
         idle, total = self._cpu()
@@ -68,20 +98,14 @@ class Res:
         self.prev = (idle, total)
         cpu = 100 * (1 - (idle - pi) / max(1, total - pt))
         mem = {l.split(":")[0]: int(l.split()[1]) for l in open("/proc/meminfo")}
-        used = mem["MemTotal"] - mem["MemAvailable"]
-        ram = 100 * used / mem["MemTotal"]
+        ram = 100 * (mem["MemTotal"] - mem["MemAvailable"]) / mem["MemTotal"]
+        st = os.statvfs("/")
+        disk = 100 * (1 - st.f_bavail / st.f_blocks)
         temp = int(open("/sys/class/thermal/thermal_zone0/temp").read()) / 1000
-        return cpu, ram, used // 1024, mem["MemTotal"] // 1024, temp
+        return {"cpu": cpu, "ram": ram, "disk": disk, "temp": temp}
 
 
-def bar(d, x, y, w, h, pct, col):
-    d.rounded_rectangle((x, y, x + w, y + h), 4, fill=(40, 46, 60))
-    fw = int(w * max(0, min(100, pct)) / 100)
-    if fw > 6:
-        d.rounded_rectangle((x, y, x + fw, y + h), 4, fill=col)
-
-
-STALE_S = 15
+# ---- data -------------------------------------------------------------------
 _last = {"p1": None, "sf": None}
 
 
@@ -98,77 +122,221 @@ def _fresh(x):
     return x is not None and time.time() - x["ts"] < STALE_S
 
 
-def tiles(v):
-    p1, sf = v.get("p1"), v.get("sf")
-    out = []
+def flows(p1, sf):
+    """Energy flows in W between the four tiles (all >= 0)."""
+    f = dict.fromkeys(["solar_grid", "solar_battery", "solar_home",
+                       "grid_battery", "grid_home", "battery_home"], 0)
+    if not sf:
+        return f, None
+    solar, ac_in, ac_out = sf["solar_w"], sf["grid_to_bat_w"], sf["to_home_w"]
+    solar_out = min(solar, ac_out)                 # solar sent out on the AC side
+    f["solar_battery"] = max(0, solar - solar_out)
+    f["battery_home"] = max(0, ac_out - solar_out)
+    f["grid_battery"] = ac_in
+    home = None
     if p1:
         g = p1["grid_w"]
-        sub = "L1 {} / L2 {} / L3 {} W".format(*p1["phases_w"])
-        out.append(("Grid  " + ("import" if g >= 0 else "export"), f"{abs(g)} W", sub, BLUE, _fresh(p1)))
-    else:
-        out.append(("Grid", "-- W", "", BLUE, False))
-    if sf:
-        out.append(("Solar", f"{sf['solar_w']} W", "", YELLOW, _fresh(sf)))
-        if sf["bat_charge_w"] > 0:
-            sub = f"charging {sf['bat_charge_w']} W"
-            if sf["grid_to_bat_w"] > 0:
-                sub += f"  (grid {sf['grid_to_bat_w']} W)"
-        elif sf["bat_discharge_w"] > 0:
-            sub = f"discharging {sf['bat_discharge_w']} W"
-        else:
-            sub = "idle"
-        out.append(("Battery", f"{sf['soc']} %", sub, GREEN, _fresh(sf)))
-    else:
-        out.append(("Solar", "-- W", "", YELLOW, False))
-        out.append(("Battery", "-- %", "", GREEN, False))
-    cur = tibber.current()
-    if cur:
-        price, level = cur
-        out.append(("Price  ct/kWh", f"{price * 100:.0f}", level.replace("_", " ").lower(), PURPLE, True))
-    else:
-        out.append(("Price  ct/kWh", "--", "no price data", PURPLE, False))
-    return out
-
-
-MODE_COL = {"CHARGE": (80, 210, 120), "DISCHARGE": (255, 150, 60), "BYPASS": (150, 160, 180)}
-PLAN_FILE = "/run/hems/plan.json"
+        home = max(0, g + ac_out - ac_in)
+        if g >= 0:
+            f["grid_home"] = max(0, g - ac_in)
+            f["solar_home"] = solar_out
+        else:                                      # exporting
+            f["solar_grid"] = min(solar_out, -g)
+            f["solar_home"] = max(0, solar_out - f["solar_grid"])
+    return f, home
 
 
 def load_plan():
     try:
-        with open(PLAN_FILE) as f:
-            p = json.load(f)
+        with open(PLAN_FILE) as fh:
+            p = json.load(fh)
         if time.time() - datetime.fromisoformat(p["created"]).timestamp() > 20 * 60:
-            return None                     # stale
+            return None
         return p
     except Exception:
         return None
 
 
-def plan_box(d, y):
-    p = load_plan()
-    d.rounded_rectangle((12, y, W - 12, y + 42), 10, fill=TILE)
-    if not p:
-        d.text((24, y + 13), "Plan: not available", font=f_sm, fill=MUTED)
+# ---- drawing helpers --------------------------------------------------------
+def text_w(d, s, f):
+    return int(d.textlength(s, font=f))
+
+
+def bar(d, x, y, w, h, pct, col):
+    d.rounded_rectangle((x, y, x + w, y + h), 4, fill=(40, 46, 60))
+    fw = int(w * max(0, min(100, pct)) / 100)
+    if fw >= 6:
+        d.rounded_rectangle((x, y, x + fw, y + h), 4, fill=col)
+
+
+def arrow(d, x1, y1, x2, y2, col, active):
+    if not active:
+        d.line((x1, y1, x2, y2), fill=LINE, width=2)
         return
-    s0 = p["slots"][0]
-    col = MODE_COL[s0["mode"]]
-    d.rounded_rectangle((12, y, W - 12, y + 42), 10, fill=TILE, outline=col, width=2)
-    txt = s0["mode"] + (f" {s0['power_w']} W" if s0["power_w"] else "")
-    d.text((24, y + 5), txt, font=f_sm, fill=col)
-    if p.get("shadow"):
-        d.text((W - 24, y + 7), "shadow", font=f_xs, fill=MUTED, anchor="ra")
-    nxt = None
-    for sl in p["slots"][1:]:
-        if sl["mode"] != s0["mode"]:
-            nxt = sl
-            break
-    line = f"€{p['grid_saving_eur'] - p['wear_eur']:.2f} net"
-    if nxt:
-        t = datetime.fromisoformat(nxt["start"])
-        day = "" if t.date() == datetime.now().date() else t.strftime("%a ")
-        line = f"next {nxt['mode'].lower()} {day}{t:%H:%M}  ·  " + line
-    d.text((24, y + 25), line, font=f_xs, fill=MUTED)
+    ang = math.atan2(y2 - y1, x2 - x1)
+    hx, hy = x2 - 7 * math.cos(ang), y2 - 7 * math.sin(ang)
+    d.line((x1, y1, hx, hy), fill=col, width=3)
+    left = (hx + 5 * math.cos(ang + math.pi / 2), hy + 5 * math.sin(ang + math.pi / 2))
+    right = (hx + 5 * math.cos(ang - math.pi / 2), hy + 5 * math.sin(ang - math.pi / 2))
+    d.polygon([(x2, y2), left, right], fill=col)
+
+
+def pill(d, cx, cy, txt, col):
+    f = font(10, True)
+    w = text_w(d, txt, f) + 10
+    d.rounded_rectangle((cx - w / 2, cy - 7, cx + w / 2, cy + 7), 7, fill=BG, outline=col, width=1)
+    d.text((cx, cy), txt, font=f, fill=col, anchor="mm")
+
+
+# ---- icons (line drawings, ~14 px unless noted) ------------------------------
+def icon_sun(d, cx, cy, col, r=3.5, ray=6.5):
+    d.ellipse((cx - r, cy - r, cx + r, cy + r), outline=col, width=2)
+    for k in range(8):
+        a = k * math.pi / 4
+        d.line((cx + (r + 1.5) * math.cos(a), cy + (r + 1.5) * math.sin(a),
+                cx + ray * math.cos(a), cy + ray * math.sin(a)), fill=col, width=2)
+
+
+def icon_grid(d, x, y, col):
+    d.line((x + 3, y + 14, x + 7, y), fill=col, width=2)
+    d.line((x + 11, y + 14, x + 7, y), fill=col, width=2)
+    d.line((x + 1, y + 4, x + 13, y + 4), fill=col, width=2)
+    d.line((x + 4, y + 9, x + 10, y + 9), fill=col, width=2)
+
+
+def icon_battery(d, x, y, col):
+    d.rounded_rectangle((x, y + 3, x + 12, y + 11), 2, outline=col, width=2)
+    d.rectangle((x + 13, y + 6, x + 14, y + 8), fill=col)
+    d.rectangle((x + 3, y + 6, x + 6, y + 8), fill=col)
+
+
+def icon_home(d, x, y, col):
+    d.line((x, y + 7, x + 7, y + 1), fill=col, width=2)
+    d.line((x + 7, y + 1, x + 14, y + 7), fill=col, width=2)
+    d.rectangle((x + 2, y + 7, x + 12, y + 14), outline=col, width=2)
+    d.rectangle((x + 6, y + 10, x + 8, y + 14), fill=col)
+
+
+def icon_cloud(d, x, y, col, fill=TILE):
+    """Cloud in a 22x14 box at (x, y)."""
+    d.ellipse((x + 6, y, x + 17, y + 11), fill=fill, outline=col, width=2)
+    d.ellipse((x, y + 4, x + 10, y + 14), fill=fill, outline=col, width=2)
+    d.ellipse((x + 12, y + 4, x + 22, y + 14), fill=fill, outline=col, width=2)
+    d.rectangle((x + 5, y + 7, x + 17, y + 12), fill=fill)
+    d.line((x + 5, y + 13, x + 17, y + 13), fill=col, width=2)
+
+
+def icon_moon(d, cx, cy, col, r=5):
+    d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=col)
+    d.ellipse((cx - r + 4, cy - r - 2, cx + r + 4, cy + r - 2), fill=BG)
+
+
+def weather_icon(d, x, y, kind, day):
+    """Weather icon in a 22x22 box at (x, y)."""
+    sky = (lambda: icon_sun(d, x + 8, y + 8, YELLOW, r=3, ray=6)) if day else \
+          (lambda: icon_moon(d, x + 8, y + 7, (180, 188, 208)))
+    if kind == "clear":
+        if day:
+            icon_sun(d, x + 11, y + 11, YELLOW, r=4.5, ray=9)
+        else:
+            icon_moon(d, x + 11, y + 11, (180, 188, 208), r=7)
+        return
+    if kind == "partly":
+        sky()
+    icon_cloud(d, x, y + 6, WHITE, fill=BG)
+    if kind == "rain":
+        for k in range(3):
+            d.line((x + 6 + 5 * k, y + 21, x + 4 + 5 * k, y + 24), fill=BLUE, width=2)
+    elif kind == "snow":
+        for k in range(3):
+            d.ellipse((x + 4 + 6 * k, y + 21, x + 7 + 6 * k, y + 24), fill=WHITE)
+    elif kind == "thunder":
+        d.polygon([(x + 12, y + 17), (x + 8, y + 23), (x + 11, y + 23), (x + 9, y + 27),
+                   (x + 15, y + 20), (x + 12, y + 20)], fill=YELLOW)
+    elif kind == "fog":
+        for k in range(2):
+            d.line((x + 2, y + 22 + 3 * k, x + 20, y + 22 + 3 * k), fill=MUTED, width=2)
+
+
+# ---- sections ---------------------------------------------------------------
+def header(d, now):
+    d.text((12, 8), "HEMS", font=font(20, True), fill=FG)
+    d.text((W / 2, 12), now.strftime("%a %H:%M"), font=font(14), fill=MUTED, anchor="ma")
+    w = weather.current()
+    if w:
+        t = f"{w['temp_c']:.0f}°C"
+        f = font(15, True)
+        tx = W - 12 - text_w(d, t, f)
+        d.text((tx, 11), t, font=f, fill=FG)
+        weather_icon(d, tx - 27, 5, weather.kind(w["code"]), w["is_day"])
+
+
+def tile(d, key, label, icon, col, value, unit, sub, ok, sub_col=MUTED):
+    x, y = POS[key]
+    d.rounded_rectangle((x, y, x + TW, y + TH), 12, fill=TILE, outline=col if ok else (70, 76, 90), width=2)
+    icon(d, x + 10, y + 10, col if ok else MUTED)
+    d.text((x + 30, y + 9), label, font=font(13), fill=col if ok else MUTED)
+    if not ok:
+        d.text((x + TW - 10, y + 12), "offline", font=font(10), fill=RED, anchor="ra")
+    fv, fu = font(26, True), font(14)
+    uw = text_w(d, unit, fu)
+    d.text((x + TW - 10, y + 60), unit, font=fu, fill=FG if ok else MUTED, anchor="rs")
+    d.text((x + TW - 10 - uw, y + 60), value, font=fv, fill=FG if ok else MUTED, anchor="rs")
+    if sub:
+        d.text((x + 10, y + TH - 10), sub, font=font(11), fill=sub_col, anchor="ls")
+
+
+def energy_section(d, v):
+    p1, sf = v.get("p1"), v.get("sf")
+    p1_ok, sf_ok = _fresh(p1), _fresh(sf)
+    f, home = flows(p1 if p1_ok else None, sf if sf_ok else None)
+    on = {k: w >= FLOW_MIN_W for k, w in f.items()}
+
+    # arrows first (tiles are drawn on top of their ends)
+    arrow(d, 132, 90, 188, 90, YELLOW, on["solar_grid"])
+    arrow(d, 132, 140, 188, 176, YELLOW, on["solar_home"])
+    arrow(d, 70, 139, 70, 175, YELLOW, on["solar_battery"])
+    arrow(d, 188, 140, 133, 175, BLUE, on["grid_battery"])
+    arrow(d, 250, 139, 250, 175, BLUE, on["grid_home"])
+    arrow(d, 131, 226, 187, 226, GREEN, on["battery_home"])
+
+    # tiles
+    if sf:
+        tile(d, "solar", "Solar", lambda dd, x, y, c: icon_sun(dd, x + 7, y + 7, c, r=3, ray=6.5),
+             YELLOW, f"{sf['solar_w']}", " W", "" if sf["solar_w"] >= FLOW_MIN_W else "no sun", sf_ok)
+        if sf["bat_charge_w"] > 0:
+            bsub = f"charging {sf['bat_charge_w']} W"
+        elif sf["bat_discharge_w"] > 0:
+            bsub = f"discharging {sf['bat_discharge_w']} W"
+        else:
+            bsub = "idle"
+        tile(d, "battery", "Battery", icon_battery, GREEN, f"{sf['soc']}", " %", bsub, sf_ok)
+    else:
+        tile(d, "solar", "Solar", lambda dd, x, y, c: icon_sun(dd, x + 7, y + 7, c, r=3, ray=6.5),
+             YELLOW, "--", " W", "", False)
+        tile(d, "battery", "Battery", icon_battery, GREEN, "--", " %", "", False)
+    if p1:
+        g = p1["grid_w"]
+        tile(d, "grid", "Grid", icon_grid, BLUE, f"{abs(g)}", " W", "import" if g >= 0 else "export", p1_ok)
+    else:
+        tile(d, "grid", "Grid", icon_grid, BLUE, "--", " W", "", False)
+    tile(d, "home", "Home", icon_home, WHITE, f"{home}" if home is not None else "--", " W",
+         "consumption", home is not None)
+
+    # flow labels on top
+    if on["solar_grid"]:
+        pill(d, 160, 90, f"{f['solar_grid']} W", YELLOW)
+    if on["solar_battery"]:
+        pill(d, 70, 157, f"{f['solar_battery']} W", YELLOW)
+    if on["grid_home"]:
+        pill(d, 250, 157, f"{f['grid_home']} W", BLUE)
+    if on["battery_home"]:
+        pill(d, 160, 226, f"{f['battery_home']} W", GREEN)
+    both = on["grid_battery"] and on["solar_home"]
+    if on["grid_battery"]:
+        pill(d, 160, 150 if both else 158, f"{f['grid_battery']} W", BLUE)
+    if on["solar_home"]:
+        pill(d, 160, 167 if both else 158, f"{f['solar_home']} W", YELLOW)
 
 
 def price_chart(d, x, y, h):
@@ -194,74 +362,92 @@ def price_chart(d, x, y, h):
         x0 = x + px * i
         end = t + timedelta(minutes=15)
         if t <= now < end:
-            col = (255, 235, 255)
+            col = CHART_COL["now"]
         elif end <= now:
-            col = (75, 50, 80)
+            col = CHART_COL["past"]
         else:
-            mode = plan_modes.get(t.isoformat())
-            col = tuple(int(c * 0.8) for c in MODE_COL[mode]) if mode in ("CHARGE", "DISCHARGE") else (120, 70, 125)
+            col = CHART_COL.get(plan_modes.get(t.isoformat()), CHART_COL["BYPASS"])
         d.rectangle((x0, round(y + h - bh), x0 + px - 1, y + h), fill=col)
 
 
-def chart_legend(d, x, baseline):
-    """Small colour key under the price chart."""
-    items = [("charge", tuple(int(c * 0.8) for c in MODE_COL["CHARGE"])),
-             ("discharge", tuple(int(c * 0.8) for c in MODE_COL["DISCHARGE"])),
-             ("bypass", (120, 70, 125)),
-             ("now", (255, 235, 255))]
-    for name, col in items:
-        d.rectangle((x, baseline - 8, x + 7, baseline - 1), fill=col)
-        d.text((x + 11, baseline), name, font=f_xs, fill=MUTED, anchor="ls")
-        x += 11 + int(d.textlength(name, font=f_xs)) + 9
+def price_section(d, y):
+    cur = tibber.current()
+    ok = cur is not None
+    d.rounded_rectangle((12, y, W - 12, y + 76), 12, fill=TILE, outline=PURPLE if ok else (70, 76, 90), width=2)
+    label = "Price ct/kWh"
+    d.text((24, y + 8), label, font=font(13), fill=PURPLE if ok else MUTED)
+    if not ok:
+        d.text((W - 24, y + 12), "no price data", font=font(10), fill=RED, anchor="ra")
+        d.text((W - 24, y + 50), "--", font=font(32, True), fill=MUTED, anchor="rs")
+        return
+    price, level = cur
+    d.text((24 + text_w(d, label, font(13)) + 6, y + 10), "· " + level.replace("_", " ").lower(),
+           font=font(11), fill=MUTED)
+    d.text((W - 24, y + 50), f"{price * 100:.0f}", font=font(32, True), fill=FG, anchor="rs")
+    price_chart(d, 24, y + 28, 22)
+    # legend
+    lx, ly = 24, y + 66
+    for name, col in (("charge", CHART_COL["CHARGE"]), ("discharge", CHART_COL["DISCHARGE"]),
+                      ("bypass", CHART_COL["BYPASS"]), ("now", CHART_COL["now"])):
+        d.rectangle((lx, ly - 7, lx + 6, ly - 1), fill=col)
+        d.text((lx + 10, ly), name, font=font(10), fill=MUTED, anchor="ls")
+        lx += 10 + text_w(d, name, font(10)) + 9
+
+
+def plan_section(d, y):
+    p = load_plan()
+    if not p:
+        d.rounded_rectangle((12, y, W - 12, y + 42), 10, fill=TILE)
+        d.text((24, y + 13), "Plan: not available", font=font(14), fill=MUTED)
+        return
+    s0 = p["slots"][0]
+    col = MODE_COL[s0["mode"]]
+    d.rounded_rectangle((12, y, W - 12, y + 42), 10, fill=TILE, outline=col, width=2)
+    d.text((24, y + 5), s0["mode"] + (f" {s0['power_w']} W" if s0["power_w"] else ""), font=font(14), fill=col)
+    if p.get("shadow"):
+        d.text((W - 24, y + 7), "shadow", font=font(11), fill=MUTED, anchor="ra")
+    nxt = next((sl for sl in p["slots"][1:] if sl["mode"] != s0["mode"]), None)
+    line = f"€{p['grid_saving_eur'] - p['wear_eur']:.2f} net"
+    if nxt:
+        t = datetime.fromisoformat(nxt["start"])
+        day = "" if t.date() == datetime.now().date() else t.strftime("%a ")
+        line = f"next {nxt['mode'].lower()} {day}{t:%H:%M}  ·  " + line
+    d.text((24, y + 24), line, font=font(11), fill=MUTED)
+
+
+def resource_section(d, res, y):
+    d.line((12, y, W - 12, y), fill=(40, 46, 60))
+    cw, gap, f = 88, 16, font(11)
+    items = [("CPU", res["cpu"], (120, 180, 255)), ("RAM", res["ram"], (150, 220, 160)),
+             ("Disk", res["disk"], (230, 190, 120))]
+    for k, (name, pct, col) in enumerate(items):
+        x = 12 + k * (cw + gap)
+        d.text((x, y + 12), name, font=f, fill=MUTED)
+        val = f"{pct:.0f}%"
+        if name == "CPU":
+            tcol = RED if res["temp"] >= 70 else MUTED
+            tt = f" · {res['temp']:.0f}°C"
+            d.text((x + cw, y + 12), tt, font=f, fill=tcol, anchor="ra")
+            d.text((x + cw - text_w(d, tt, f), y + 12), val, font=f, fill=FG, anchor="ra")
+        else:
+            d.text((x + cw, y + 12), val, font=f, fill=FG, anchor="ra")
+        bar(d, x, y + 30, cw, 8, pct, col)
 
 
 def render(values, res, now):
     img = Image.new("RGB", (W, H), BG)
     d = ImageDraw.Draw(img)
-    d.text((12, 10), "HEMS", font=f_mid, fill=FG)
-    d.text((W - 12, 13), now.strftime("%a %H:%M"), font=f_sm, fill=MUTED, anchor="ra")
-
-    y, th = 44, 76
-    for label, val, sub, col, ok in tiles(values):
-        d.rounded_rectangle((12, y, W - 12, y + th), 12, fill=TILE,
-                            outline=col if ok else (70, 76, 90), width=2)
-        d.text((26, y + 10), label, font=f_sm, fill=col if ok else MUTED)
-        if not ok:
-            d.text((W - 26, y + 12), "offline", font=f_xs, fill=(255, 120, 100), anchor="ra")
-        d.text((W - 26, y + th - 30), val, font=f_big if len(val) < 9 else f_mid,
-               fill=FG if ok else MUTED, anchor="rs")
-        if label.startswith("Price") and ok:
-            price_chart(d, 26, y + 30, 22)
-            if sub:   # price level goes on the label line
-                lx = 26 + int(d.textlength(label, font=f_sm)) + 8
-                d.text((lx, y + 13), "· " + sub, font=f_xs, fill=MUTED)
-            chart_legend(d, 26, y + th - 12)
-        elif sub:
-            d.text((26, y + th - 12), sub, font=f_xs, fill=MUTED, anchor="ls")
-        y += th + 6
-
-    plan_box(d, y)
-
-    # resource monitor strip
-    cpu, ram, used, total, temp = res
-    y = H - 50
-    d.line((12, y - 8, W - 12, y - 8), fill=(40, 46, 60))
-    d.text((12, y), "CPU", font=f_xs, fill=MUTED)
-    bar(d, 46, y + 2, 90, 10, cpu, (120, 180, 255))
-    d.text((142, y), f"{cpu:3.0f}%", font=f_xs, fill=FG)
-    d.text((186, y), "RAM", font=f_xs, fill=MUTED)
-    bar(d, 220, y + 2, 60, 10, ram, (150, 220, 160))
-    d.text((W - 12, y), f"{ram:2.0f}%", font=f_xs, fill=FG, anchor="ra")
-    d.text((12, y + 20), f"{used}/{total} MB", font=f_xs, fill=MUTED)
-    tcol = (255, 120, 100) if temp >= 70 else MUTED
-    d.text((W - 12, y + 20), f"{temp:.0f}°C", font=f_xs, fill=tcol, anchor="ra")
+    header(d, now)
+    energy_section(d, values)
+    price_section(d, 280)
+    plan_section(d, 362)
+    resource_section(d, res, 414)
     return img
 
 
 def to_fb(img, level):
     img = img.transpose(ROTATE)
-    a = np.asarray(img, dtype=np.float32) * level
-    a = a.astype(np.uint16)
+    a = (np.asarray(img, dtype=np.float32) * level).astype(np.uint16)
     rgb565 = ((a[..., 0] >> 3) << 11) | ((a[..., 1] >> 2) << 5) | (a[..., 2] >> 3)
     with open(FBDEV, "wb") as fb:
         fb.write(rgb565.astype("<u2").tobytes())
@@ -269,6 +455,7 @@ def to_fb(img, level):
 
 def main():
     tibber.start()
+    weather.start()
     r = Res()
     time.sleep(0.5)
     while True:

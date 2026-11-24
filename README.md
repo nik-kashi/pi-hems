@@ -7,7 +7,7 @@ First goal: optimise charging and discharging of a **Zendure SolarFlow 2400 Pro*
 
 <p align="center"><img src="docs/screenshot.png" width="320" alt="HEMS status screen on the 3.5&quot; TFT"></p>
 
-<p align="center"><sub>Status screen (3.5" TFT, portrait): grid, solar, battery, 15-min prices for today + tomorrow coloured by the plan, current plan step, CPU/RAM.</sub></p>
+<p align="center"><sub>Status screen (3.5" TFT, portrait): energy flow between solar, grid, battery and home; weather; 15-min prices for today + tomorrow coloured by the plan; current plan step; CPU/RAM/disk.</sub></p>
 
 ## Hardware
 
@@ -59,7 +59,8 @@ The planner solves this over the whole known price horizon (up to ~44 h after
 |---|---|
 | `devices.py` | Read P1 meter and SolarFlow over the local API |
 | `tibber.py` | Fetch Tibber 15-min prices, cache in `/var/lib/hems/prices.json`, background refresh |
-| `display.py` | Status screen: grid, solar, battery, price (+ today's hourly chart), CPU/RAM/temp; dims between sunset and sunrise |
+| `display.py` | Status screen: 2x2 Solar/Grid/Battery/Home tiles with energy-flow arrows, weather, price chart (today + tomorrow, coloured by plan), plan, CPU/RAM/disk; dims between sunset and sunrise |
+| `weather.py` | Current temperature + weather code from Open-Meteo (no key), every 15 min |
 | `logger.py` | Samples every 5 s, writes 15-min energy totals split by operating mode to `/var/lib/hems/energy-YYYY-MM.csv` |
 | `config.py` | All tunables: device IPs, battery capacity/limits, efficiencies, wear cost, shadow mode |
 | `planner.py` | Linear-program battery plan over all known 15-min prices: CHARGE / BYPASS / DISCHARGE per slot; `hems-plan` prints it |

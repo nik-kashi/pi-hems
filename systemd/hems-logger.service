@@ -1,0 +1,13 @@
+[Unit]
+Description=HEMS energy logger
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 /opt/hems/logger.py
+Restart=always
+RestartSec=10
+Nice=5
+
+[Install]
+WantedBy=multi-user.target

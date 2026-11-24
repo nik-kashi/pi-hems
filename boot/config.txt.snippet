@@ -1,0 +1,10 @@
+# Append to /boot/firmware/config.txt on the Pi (DietPi, Raspberry Pi 3B+)
+
+# HEMS: Ethernet only, no radios
+dtoverlay=disable-wifi
+dtoverlay=disable-bt
+
+# 3.5in SPI TFT (ILI9486, piscreen-compatible), landscape panel; the
+# portrait rotation is done in software (display.py)
+dtparam=spi=on
+dtoverlay=piscreen,speed=16000000,rotate=90

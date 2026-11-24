@@ -172,20 +172,26 @@ def plan_box(d, y):
 
 
 def price_chart(d, x, y, h):
-    """Today's 15-minute prices, 2 px per slot (96 slots = 192 px).
-    Past slots dark, current slot white, future slots coloured by planned mode."""
+    """15-minute prices for today, plus tomorrow once published.
+    Today only: 2 px per slot. Today + tomorrow: 1 px per slot with a midnight
+    marker. Past slots dark, current slot white, future slots coloured by plan."""
     now = datetime.now().astimezone()
-    today = [(t, p) for t, p, _ in tibber.slots() if t.date() == now.date()]
-    if not today:
+    days = [now.date(), now.date() + timedelta(days=1)]
+    slots = [(t, p) for t, p, _ in tibber.slots() if t.date() in days]
+    if not slots:
         return
-    vals = [p for _, p in today]
+    two_days = any(t.date() == days[1] for t, _ in slots)
+    px = 1 if two_days else 2
+    vals = [p for _, p in slots]
     lo, hi = min(vals), max(vals)
     span = max(hi - lo, 1e-6)
     plan_modes = {sl["start"]: sl["mode"] for sl in (load_plan() or {}).get("slots", [])}
-    for t, p in today:
-        i = t.hour * 4 + t.minute // 15
+    if two_days:
+        d.line((x + 96, y - 2, x + 96, y + h), fill=(70, 76, 90))
+    for t, p in slots:
+        i = (t.date() - days[0]).days * 96 + t.hour * 4 + t.minute // 15
         bh = 3 + (h - 3) * (p - lo) / span
-        x0 = x + 2 * i
+        x0 = x + px * i
         end = t + timedelta(minutes=15)
         if t <= now < end:
             col = (255, 235, 255)
@@ -194,7 +200,7 @@ def price_chart(d, x, y, h):
         else:
             mode = plan_modes.get(t.isoformat())
             col = tuple(int(c * 0.8) for c in MODE_COL[mode]) if mode in ("CHARGE", "DISCHARGE") else (120, 70, 125)
-        d.rectangle((x0, round(y + h - bh), x0 + 1, y + h), fill=col)
+        d.rectangle((x0, round(y + h - bh), x0 + px - 1, y + h), fill=col)
 
 
 def render(values, res, now):

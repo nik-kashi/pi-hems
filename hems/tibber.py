@@ -36,17 +36,17 @@ def _fetch():
     return pi["today"] + pi["tomorrow"]
 
 
-def _store(raw):
+def _store(raw, fetched_at=None):
     global _slots, _fetched_at
     slots = [(datetime.fromisoformat(x["startsAt"]), x["total"], x["level"]) for x in raw]
     with _lock:
-        _slots, _fetched_at = slots, time.time()
+        _slots, _fetched_at = slots, fetched_at or time.time()
 
 
 def _load_cache():
     try:
         with open(CACHE) as f:
-            _store(json.load(f))
+            _store(json.load(f), fetched_at=os.path.getmtime(CACHE))
     except Exception:
         pass
 

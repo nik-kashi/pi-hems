@@ -5,6 +5,10 @@ A lightweight Home Energy Management System on a Raspberry Pi 3B+.
 First goal: optimise charging and discharging of a **Zendure SolarFlow 2400 Pro**
 (PV + home battery) using local device data and **Tibber** dynamic prices.
 
+<p align="center"><img src="docs/screenshot.png" width="320" alt="HEMS status screen on the 3.5&quot; TFT"></p>
+
+<p align="center"><sub>Status screen (3.5" TFT, portrait): grid, solar, battery, 15-min prices for today + tomorrow coloured by the plan, current plan step, CPU/RAM.</sub></p>
+
 ## Hardware
 
 | Part | Notes |

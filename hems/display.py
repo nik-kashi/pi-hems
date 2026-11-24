@@ -286,6 +286,60 @@ def tile(d, key, label, icon, col, value, unit, sub, ok, sub_col=MUTED):
         d.text((x + 10, y + TH - 10), sub, font=font(11), fill=sub_col, anchor="ls")
 
 
+PHASE_COL = [(168, 212, 255), (90, 160, 255), (44, 95, 184)]   # L1 light, L2 mid, L3 dark blue
+PHASE_TXT = [(168, 212, 255), (90, 160, 255), (111, 155, 230)]  # L3 label lighter for contrast
+
+
+def grid_tile(d, p1, ok):
+    """Grid tile: net total in W, stacked bar of each phase's share, W per phase.
+    An exporting phase (negative value) is drawn in yellow with a minus sign."""
+    x, y = POS["grid"]
+    col = BLUE if ok else MUTED
+    d.rounded_rectangle((x, y, x + TW, y + TH), 12, fill=TILE, outline=BLUE if ok else (70, 76, 90), width=2)
+    icon_grid(d, x + 10, y + 10, col)
+    d.text((x + 30, y + 9), "Grid", font=font(13), fill=col)
+    if p1 is None:
+        d.text((x + TW - 10, y + 52), "--", font=font(22, True), fill=MUTED, anchor="rs")
+        return
+    g = p1["grid_w"]
+    lx = x + 30 + text_w(d, "Grid", font(13)) + 5
+    if not ok:
+        d.text((x + TW - 10, y + 12), "offline", font=font(10), fill=RED, anchor="ra")
+    else:
+        d.text((lx, y + 13), "import" if g >= 0 else "export", font=font(9), fill=MUTED)
+    fv, fu = font(22, True), font(12)
+    uw = text_w(d, " W", fu)
+    d.text((x + TW - 10, y + 52), " W", font=fu, fill=FG if ok else MUTED, anchor="rs")
+    d.text((x + TW - 10 - uw, y + 52), f"{abs(g)}", font=fv, fill=FG if ok else MUTED, anchor="rs")
+
+    # stacked share bar
+    phases = p1["phases_w"]
+    bx0, bx1, by = x + 10, x + TW - 10, y + 60
+    d.rounded_rectangle((bx0, by, bx1, by + 6), 3, fill=(40, 46, 60))
+    total = sum(abs(v) for v in phases)
+    if total > 0:
+        cx = bx0
+        for k, v in enumerate(phases):
+            w = (bx1 - bx0) * abs(v) / total
+            if w >= 0.5:
+                d.rectangle((round(cx), by, round(cx + w) - 1, by + 5), fill=YELLOW if v < 0 else PHASE_COL[k])
+            cx += w
+    # values
+    f = font(9)
+    for k, v in enumerate(phases):
+        name, val = f"L{k + 1}", f"{v}" if v >= 0 else f"−{abs(v)}"
+        wn, wv = text_w(d, name + " ", f), text_w(d, val, f)
+        if k == 0:
+            tx = bx0
+        elif k == 1:
+            tx = (bx0 + bx1) / 2 - (wn + wv) / 2
+        else:
+            tx = bx1 - wn - wv
+        ncol = YELLOW if v < 0 else PHASE_TXT[k]
+        d.text((tx, y + 80), name, font=f, fill=ncol, anchor="ls")
+        d.text((tx + wn, y + 80), val, font=f, fill=YELLOW if v < 0 else FG, anchor="ls")
+
+
 def energy_section(d, v):
     p1, sf = v.get("p1"), v.get("sf")
     p1_ok, sf_ok = _fresh(p1), _fresh(sf)
@@ -315,11 +369,7 @@ def energy_section(d, v):
         tile(d, "solar", "Solar", lambda dd, x, y, c: icon_sun(dd, x + 7, y + 7, c, r=3, ray=6.5),
              YELLOW, "--", " W", "", False)
         tile(d, "battery", "Battery", icon_battery, GREEN, "--", " %", "", False)
-    if p1:
-        g = p1["grid_w"]
-        tile(d, "grid", "Grid", icon_grid, BLUE, f"{abs(g)}", " W", "import" if g >= 0 else "export", p1_ok)
-    else:
-        tile(d, "grid", "Grid", icon_grid, BLUE, "--", " W", "", False)
+    grid_tile(d, p1, p1_ok)
     tile(d, "home", "Home", icon_home, WHITE, f"{home}" if home is not None else "--", " W",
          "consumption", home is not None)
 

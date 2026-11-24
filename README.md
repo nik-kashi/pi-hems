@@ -98,5 +98,8 @@ The planner solves this over the whole known price horizon (up to ~44 h after
   (app self-consumption + local charge/hold) is not possible; the app must be
   in a mode that does not control the battery. **Custom mode with all
   schedules deleted works**: local commands hold. (Test 2026-11-24, `tools/zcheck.py`.)
+- The TFT backlight is wired permanently on (GPIO22 has no effect), so
+  night mode can only dim the image, not switch the backlight off. HDMI
+  output is switched off at boot (`hems-hdmi-off`).
 - Native self-consumption reacts to load steps in 10-20 s and keeps the grid
   within about +-15 W in steady state.

@@ -15,6 +15,7 @@ ssh "$HOST" '
   ln -sf /opt/hems/report.py /usr/local/bin/hems-report
   test -f /etc/hems/secrets.env || echo "WARNING: /etc/hems/secrets.env missing (TIBBER_TOKEN)"
   systemctl daemon-reload
+  systemctl enable -q --now hems-hdmi-off
   for s in hems-display hems-logger hems-planner hems-executor; do systemctl enable -q "$s"; systemctl restart "$s"; done
   sleep 3
   systemctl is-active hems-display hems-logger hems-planner hems-executor

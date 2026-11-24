@@ -3,8 +3,7 @@ import json
 import time
 import urllib.request
 
-SOLARFLOW = "http://192.168.2.32"
-P1_METER = "http://192.168.2.34"
+from config import SOLARFLOW, P1_METER
 TIMEOUT_S = 1.5
 
 

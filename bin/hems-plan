@@ -1,0 +1,3 @@
+#!/bin/sh
+# Print the current battery plan.
+cd /opt/hems && set -a && . /etc/hems/secrets.env && set +a && exec python3 planner.py --print

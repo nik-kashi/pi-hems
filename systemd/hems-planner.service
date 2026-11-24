@@ -1,0 +1,15 @@
+[Unit]
+Description=HEMS battery planner (shadow mode unless SHADOW_MODE=False)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+EnvironmentFile=/etc/hems/secrets.env
+WorkingDirectory=/opt/hems
+ExecStart=/usr/bin/python3 /opt/hems/planner.py
+Restart=always
+RestartSec=10
+Nice=5
+
+[Install]
+WantedBy=multi-user.target

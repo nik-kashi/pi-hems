@@ -22,8 +22,7 @@ import time
 import urllib.request
 from datetime import datetime
 
-SOLARFLOW = "http://192.168.2.32"
-P1_METER = "http://192.168.2.34"
+from config import SOLARFLOW, P1_METER
 SAMPLE_S = 5
 MAX_GAP_S = 30            # don't integrate across gaps longer than this
 DATA_DIR = "/var/lib/hems"

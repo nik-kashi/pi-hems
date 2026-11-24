@@ -8,12 +8,13 @@ import math, os, time
 from datetime import datetime, timezone
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
+import json
 import devices
 import tibber
 
 # ---- settings -------------------------------------------------------------
 FBDEV = "/dev/fb1"
-LAT, LON = 52.1, 5.1          # approximate location, used for sunrise/sunset
+from config import LAT, LON
 NIGHT_LEVEL = 0.25            # brightness factor at night (0..1)
 REFRESH_S = 2
 ROTATE = Image.Transpose.ROTATE_270   # = 90 deg clockwise; use ROTATE_90 to flip
@@ -129,6 +130,47 @@ def tiles(v):
     return out
 
 
+MODE_COL = {"CHARGE": (80, 210, 120), "DISCHARGE": (255, 150, 60), "BYPASS": (150, 160, 180)}
+PLAN_FILE = "/run/hems/plan.json"
+
+
+def load_plan():
+    try:
+        with open(PLAN_FILE) as f:
+            p = json.load(f)
+        if time.time() - datetime.fromisoformat(p["created"]).timestamp() > 20 * 60:
+            return None                     # stale
+        return p
+    except Exception:
+        return None
+
+
+def plan_box(d, y):
+    p = load_plan()
+    d.rounded_rectangle((12, y, W - 12, y + 42), 10, fill=TILE)
+    if not p:
+        d.text((24, y + 13), "Plan: not available", font=f_sm, fill=MUTED)
+        return
+    s0 = p["slots"][0]
+    col = MODE_COL[s0["mode"]]
+    d.rounded_rectangle((12, y, W - 12, y + 42), 10, fill=TILE, outline=col, width=2)
+    txt = s0["mode"] + (f" {s0['power_w']} W" if s0["power_w"] else "")
+    d.text((24, y + 5), txt, font=f_sm, fill=col)
+    if p.get("shadow"):
+        d.text((W - 24, y + 7), "shadow", font=f_xs, fill=MUTED, anchor="ra")
+    nxt = None
+    for sl in p["slots"][1:]:
+        if sl["mode"] != s0["mode"]:
+            nxt = sl
+            break
+    line = f"€{p['grid_saving_eur'] - p['wear_eur']:.2f} net"
+    if nxt:
+        t = datetime.fromisoformat(nxt["start"])
+        day = "" if t.date() == datetime.now().date() else t.strftime("%a ")
+        line = f"next {nxt['mode'].lower()} {day}{t:%H:%M}  ·  " + line
+    d.text((24, y + 25), line, font=f_xs, fill=MUTED)
+
+
 def price_chart(d, x, y, w, h):
     """Today's hourly average prices as bars; current hour highlighted."""
     now = datetime.now().astimezone()
@@ -139,10 +181,23 @@ def price_chart(d, x, y, w, h):
     lo, hi = min(vals), max(vals)
     span = max(hi - lo, 1e-6)
     bw = w / 24
+    plan_modes = {}
+    for sl in (load_plan() or {}).get("slots", []):
+        t = datetime.fromisoformat(sl["start"])
+        if t.date() == now.date() and sl["mode"] != "BYPASS":
+            plan_modes.setdefault(t.hour, sl["mode"])
     for hr, p in hrs:
         bh = 3 + (h - 3) * (p - lo) / span
         x0 = x + hr * bw
-        col = (255, 235, 255) if hr == now.hour else ((120, 70, 125) if hr > now.hour else (75, 50, 80))
+        mode = plan_modes.get(hr)
+        if hr == now.hour:
+            col = (255, 235, 255)
+        elif hr < now.hour:
+            col = (75, 50, 80)
+        elif mode in MODE_COL:
+            col = tuple(int(c * 0.8) for c in MODE_COL[mode])
+        else:
+            col = (120, 70, 125)
         d.rectangle((x0, y + h - bh, x0 + bw - 1.5, y + h), fill=col)
 
 
@@ -152,7 +207,7 @@ def render(values, res, now):
     d.text((12, 10), "HEMS", font=f_mid, fill=FG)
     d.text((W - 12, 13), now.strftime("%a %H:%M"), font=f_sm, fill=MUTED, anchor="ra")
 
-    y, th = 44, 84
+    y, th = 44, 76
     for label, val, sub, col, ok in tiles(values):
         d.rounded_rectangle((12, y, W - 12, y + th), 12, fill=TILE,
                             outline=col if ok else (70, 76, 90), width=2)
@@ -164,8 +219,10 @@ def render(values, res, now):
         if sub:
             d.text((26, y + th - 12), sub, font=f_xs, fill=MUTED, anchor="ls")
         if label.startswith("Price") and ok:
-            price_chart(d, 26, y + 32, 150, 26)
-        y += th + 8
+            price_chart(d, 26, y + 30, 150, 22)
+        y += th + 6
+
+    plan_box(d, y)
 
     # resource monitor strip
     cpu, ram, used, total, temp = res

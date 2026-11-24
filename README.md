@@ -28,6 +28,25 @@ Tibber API (prices) ──────────►┘
 All device communication is local (`GET /properties/report`). Nothing is
 written to the devices yet: the system is read-only for now.
 
+## Planner
+
+Each 15-minute slot gets one mode:
+
+| Mode | Battery |
+|---|---|
+| CHARGE | charge from the grid |
+| BYPASS | hold; house runs on grid (solar may still charge) |
+| DISCHARGE | self-use, cover house load, never export |
+
+A charge/discharge pair is only worth it when
+
+```
+discharge price > charge price / (eta_charge * eta_discharge) + wear
+```
+
+The planner solves this over the whole known price horizon (up to ~44 h after
+13:00) as a linear program and re-plans every slot with the measured SOC.
+
 ## Components (`hems/`)
 
 | File | Purpose |
@@ -36,6 +55,8 @@ written to the devices yet: the system is read-only for now.
 | `tibber.py` | Fetch Tibber 15-min prices, cache in `/var/lib/hems/prices.json`, background refresh |
 | `display.py` | Status screen: grid, solar, battery, price (+ today's hourly chart), CPU/RAM/temp; dims between sunset and sunrise |
 | `logger.py` | Samples every 5 s, writes 15-min energy totals split by operating mode to `/var/lib/hems/energy-YYYY-MM.csv` |
+| `config.py` | All tunables: device IPs, battery capacity/limits, efficiencies, wear cost, shadow mode |
+| `planner.py` | Linear-program battery plan over all known 15-min prices: CHARGE / BYPASS / DISCHARGE per slot; `hems-plan` prints it |
 | `report.py` | `hems-report [YYYY-MM-DD]`: measured charge/discharge efficiency, round trip, standby drain |
 
 ## Setup
@@ -54,5 +75,7 @@ written to the devices yet: the system is read-only for now.
 
 - [x] OS, display, live data, Tibber prices
 - [x] Energy logger to measure real losses
-- [ ] Battery wear cost model
-- [ ] Control algorithm (shadow mode first, then live; replaces Zendure "Zenki" mode)
+- [x] Planner v1 (LP, shadow mode): plan + decision log, shown on the TFT
+- [ ] Measured efficiencies and confirmed battery capacity / wear cost
+- [ ] Executor: send commands to the SolarFlow (replaces Zendure "Zenki" mode)
+- [ ] Load forecast instead of fixed house load

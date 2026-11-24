@@ -10,8 +10,8 @@ to the device's flash):
 DISCHARGE is a zero-export load follower on the P1 total:
   house  = grid_now + device_output_now      (independent of command lag)
   output = clamp(house - TARGET_GRID_W, 0, planned W)
-Decreases are sent immediately (export risk); increases at most every
-WRITE_MIN_INTERVAL_S; changes smaller than DEADBAND_W are skipped.
+After each change the loop waits WRITE_MIN_INTERVAL_S (device ramp + P1
+delay) before correcting again; changes smaller than DEADBAND_W are skipped.
 
 Safety:
   - plan missing/stale        -> BYPASS
@@ -125,10 +125,11 @@ class Executor:
                 actual_out = p["outputHomePower"]
                 house = p1["grid_w"] + actual_out          # load estimate, lag-independent
                 target = int(max(0, min(cap, house - C.TARGET_GRID_W)))
-                due = time.time() - self.last_write >= C.WRITE_MIN_INTERVAL_S
-                if target < self.out_cmd - C.DEADBAND_W:    # export risk: cut immediately
-                    self.out_cmd = target
-                elif target > self.out_cmd + C.DEADBAND_W and due:
+                # wait until the device has ramped and the (slower) P1 has caught
+                # up with the last change before correcting again; correcting
+                # sooner reacts to stale data and makes the output oscillate
+                settled = time.time() - self.last_write >= C.WRITE_MIN_INTERVAL_S
+                if settled and abs(target - self.out_cmd) >= C.DEADBAND_W:
                     self.out_cmd = target
                 self.send({"acMode": 2, "inputLimit": 0, "outputLimit": self.out_cmd},
                           f"grid {p1['grid_w']} W, out {actual_out} W")

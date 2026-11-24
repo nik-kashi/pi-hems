@@ -20,7 +20,7 @@ which is exactly the break-even rule, applied across the whole horizon.
 Re-planned every slot with the measured SOC, so forecast errors self-correct.
 
 Usage:
-  planner.py            run as service (shadow mode: plan + log, no device writes)
+  planner.py            run as service (writes /run/hems/plan.json for the executor)
   planner.py --print    compute one plan now and print it
 """
 import csv
@@ -103,7 +103,7 @@ def make_plan(now, soc_pct, slots):
     return {
         "created": now.isoformat(timespec="seconds"),
         "soc_now": soc_pct,
-        "shadow": C.SHADOW_MODE,
+        "shadow": C.EXECUTOR_DRY_RUN,
         "v_end": round(v_end, 4),
         "charged_kwh": round(float(c.sum()), 2),
         "discharged_kwh": round(float(d.sum()), 2),

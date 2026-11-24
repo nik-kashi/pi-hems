@@ -25,8 +25,10 @@ SolarFlow 2400 Pro ─(LAN)─┘    │
 Tibber API (prices) ──────────►┘
 ```
 
-All device communication is local (`GET /properties/report`). Nothing is
-written to the devices yet: the system is read-only for now.
+All device communication is local (`GET /properties/report`,
+`POST /properties/write`). Writes always set `smartMode=1` so the device
+does not write them to flash. `EXECUTOR_DRY_RUN` in `config.py` decides
+whether commands are actually sent.
 
 ## Planner
 
@@ -57,6 +59,7 @@ The planner solves this over the whole known price horizon (up to ~44 h after
 | `logger.py` | Samples every 5 s, writes 15-min energy totals split by operating mode to `/var/lib/hems/energy-YYYY-MM.csv` |
 | `config.py` | All tunables: device IPs, battery capacity/limits, efficiencies, wear cost, shadow mode |
 | `planner.py` | Linear-program battery plan over all known 15-min prices: CHARGE / BYPASS / DISCHARGE per slot; `hems-plan` prints it |
+| `executor.py` | Turns the current plan slot into SolarFlow commands (`acMode`, `inputLimit`, `outputLimit`, always `smartMode=1`); zero-export load follower while discharging; dry-run by default |
 | `report.py` | `hems-report [YYYY-MM-DD]`: measured charge/discharge efficiency, round trip, standby drain |
 
 ## Setup
@@ -77,5 +80,6 @@ The planner solves this over the whole known price horizon (up to ~44 h after
 - [x] Energy logger to measure real losses
 - [x] Planner v1 (LP, shadow mode): plan + decision log, shown on the TFT
 - [ ] Measured efficiencies and confirmed battery capacity / wear cost
-- [ ] Executor: send commands to the SolarFlow (replaces Zendure "Zenki" mode)
+- [x] Executor (dry-run): commands logged, not sent
+- [ ] Go live: verify P1 export sign, switch off Zenki, `EXECUTOR_DRY_RUN = False`
 - [ ] Load forecast instead of fixed house load

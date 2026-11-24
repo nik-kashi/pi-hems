@@ -39,3 +39,21 @@ def read_solarflow():
         "packs": len(d.get("packData", [])),
         "ts": time.time(),
     }
+
+
+def solarflow_report():
+    """Full raw report (includes the serial number needed for writes)."""
+    return _get(SOLARFLOW)
+
+
+def write_solarflow(sn, props):
+    """POST /properties/write. Returns the parsed response (or raw text)."""
+    body = json.dumps({"sn": sn, "properties": props}).encode()
+    req = urllib.request.Request(f"{SOLARFLOW}/properties/write", data=body,
+                                 headers={"Content-Type": "application/json"}, method="POST")
+    with urllib.request.urlopen(req, timeout=TIMEOUT_S * 2) as r:
+        txt = r.read().decode(errors="replace")
+    try:
+        return json.loads(txt)
+    except ValueError:
+        return txt

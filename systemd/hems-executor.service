@@ -1,0 +1,15 @@
+[Unit]
+Description=HEMS executor (sends planner decisions to the SolarFlow)
+After=network-online.target hems-planner.service
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/opt/hems
+ExecStart=/usr/bin/python3 /opt/hems/executor.py
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

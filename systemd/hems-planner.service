@@ -1,5 +1,5 @@
 [Unit]
-Description=HEMS battery planner (shadow mode unless SHADOW_MODE=False)
+Description=HEMS battery planner
 After=network-online.target
 Wants=network-online.target
 

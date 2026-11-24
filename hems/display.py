@@ -102,7 +102,8 @@ class Res:
         st = os.statvfs("/")
         disk = 100 * (1 - st.f_bavail / st.f_blocks)
         temp = int(open("/sys/class/thermal/thermal_zone0/temp").read()) / 1000
-        return {"cpu": cpu, "ram": ram, "disk": disk, "temp": temp}
+        return {"cpu": cpu, "ram": ram, "disk": disk, "temp": temp, "cores": os.cpu_count(),
+                "ram_gb": mem["MemTotal"] * 1024 / 1e9, "disk_gb": st.f_blocks * st.f_frsize / 1e9}
 
 
 # ---- data -------------------------------------------------------------------
@@ -476,9 +477,12 @@ def plan_section(d, y):
 def resource_section(d, res, y):
     d.line((12, y, W - 12, y), fill=(40, 46, 60))
     cw, gap, f = 88, 16, font(11)
-    items = [("CPU", res["cpu"], (120, 180, 255)), ("RAM", res["ram"], (150, 220, 160)),
-             ("Disk", res["disk"], (230, 190, 120))]
-    for k, (name, pct, col) in enumerate(items):
+    def gb(v):
+        return f"{v:.0f} GB" if v >= 9.95 or round(v, 1) == round(v) else f"{v:.1f} GB"
+    items = [("CPU", res["cpu"], (120, 180, 255), f"{res['cores']} cores"),
+             ("RAM", res["ram"], (150, 220, 160), "of " + gb(res["ram_gb"])),
+             ("Disk", res["disk"], (230, 190, 120), "of " + gb(res["disk_gb"]))]
+    for k, (name, pct, col, total) in enumerate(items):
         x = 12 + k * (cw + gap)
         d.text((x, y + 12), name, font=f, fill=MUTED)
         val = f"{pct:.0f}%"
@@ -490,6 +494,7 @@ def resource_section(d, res, y):
         else:
             d.text((x + cw, y + 12), val, font=f, fill=FG, anchor="ra")
         bar(d, x, y + 30, cw, 8, pct, col)
+        d.text((x + cw, y + 51), total, font=font(9), fill=MUTED, anchor="ra")
 
 
 def render(values, res, now):

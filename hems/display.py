@@ -207,11 +207,12 @@ def chart_legend(d, x, baseline):
     """Small colour key under the price chart."""
     items = [("charge", tuple(int(c * 0.8) for c in MODE_COL["CHARGE"])),
              ("discharge", tuple(int(c * 0.8) for c in MODE_COL["DISCHARGE"])),
-             ("bypass", (120, 70, 125))]
+             ("bypass", (120, 70, 125)),
+             ("now", (255, 235, 255))]
     for name, col in items:
         d.rectangle((x, baseline - 8, x + 7, baseline - 1), fill=col)
         d.text((x + 11, baseline), name, font=f_xs, fill=MUTED, anchor="ls")
-        x += 11 + int(d.textlength(name, font=f_xs)) + 12
+        x += 11 + int(d.textlength(name, font=f_xs)) + 9
 
 
 def render(values, res, now):

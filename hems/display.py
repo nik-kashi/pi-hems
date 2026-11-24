@@ -5,7 +5,7 @@ Drawn on a 320x480 portrait canvas, rotated 90 deg clockwise onto the panel.
 Dims automatically between sunset and sunrise.
 """
 import math, os, time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 import json
@@ -124,9 +124,9 @@ def tiles(v):
     cur = tibber.current()
     if cur:
         price, level = cur
-        out.append(("Price  €/kWh", f"{price:.3f}", level.replace("_", " ").lower(), PURPLE, True))
+        out.append(("Price  ct/kWh", f"{price * 100:.0f}", level.replace("_", " ").lower(), PURPLE, True))
     else:
-        out.append(("Price  €/kWh", "--", "no price data", PURPLE, False))
+        out.append(("Price  ct/kWh", "--", "no price data", PURPLE, False))
     return out
 
 
@@ -171,34 +171,30 @@ def plan_box(d, y):
     d.text((24, y + 25), line, font=f_xs, fill=MUTED)
 
 
-def price_chart(d, x, y, w, h):
-    """Today's hourly average prices as bars; current hour highlighted."""
+def price_chart(d, x, y, h):
+    """Today's 15-minute prices, 2 px per slot (96 slots = 192 px).
+    Past slots dark, current slot white, future slots coloured by planned mode."""
     now = datetime.now().astimezone()
-    hrs = tibber.hourly(now.date())
-    if not hrs:
+    today = [(t, p) for t, p, _ in tibber.slots() if t.date() == now.date()]
+    if not today:
         return
-    vals = [p for _, p in hrs]
+    vals = [p for _, p in today]
     lo, hi = min(vals), max(vals)
     span = max(hi - lo, 1e-6)
-    bw = w / 24
-    plan_modes = {}
-    for sl in (load_plan() or {}).get("slots", []):
-        t = datetime.fromisoformat(sl["start"])
-        if t.date() == now.date() and sl["mode"] != "BYPASS":
-            plan_modes.setdefault(t.hour, sl["mode"])
-    for hr, p in hrs:
+    plan_modes = {sl["start"]: sl["mode"] for sl in (load_plan() or {}).get("slots", [])}
+    for t, p in today:
+        i = t.hour * 4 + t.minute // 15
         bh = 3 + (h - 3) * (p - lo) / span
-        x0 = x + hr * bw
-        mode = plan_modes.get(hr)
-        if hr == now.hour:
+        x0 = x + 2 * i
+        end = t + timedelta(minutes=15)
+        if t <= now < end:
             col = (255, 235, 255)
-        elif hr < now.hour:
+        elif end <= now:
             col = (75, 50, 80)
-        elif mode in MODE_COL:
-            col = tuple(int(c * 0.8) for c in MODE_COL[mode])
         else:
-            col = (120, 70, 125)
-        d.rectangle((x0, y + h - bh, x0 + bw - 1.5, y + h), fill=col)
+            mode = plan_modes.get(t.isoformat())
+            col = tuple(int(c * 0.8) for c in MODE_COL[mode]) if mode in ("CHARGE", "DISCHARGE") else (120, 70, 125)
+        d.rectangle((x0, round(y + h - bh), x0 + 1, y + h), fill=col)
 
 
 def render(values, res, now):
@@ -219,7 +215,7 @@ def render(values, res, now):
         if sub:
             d.text((26, y + th - 12), sub, font=f_xs, fill=MUTED, anchor="ls")
         if label.startswith("Price") and ok:
-            price_chart(d, 26, y + 30, 150, 22)
+            price_chart(d, 26, y + 30, 22)
         y += th + 6
 
     plan_box(d, y)

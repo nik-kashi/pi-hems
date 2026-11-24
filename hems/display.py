@@ -27,7 +27,8 @@ from config import LAT, LON
 
 # ---- settings -------------------------------------------------------------
 FBDEV = "/dev/fb1"
-NIGHT_LEVEL = 0.25            # brightness factor at night (0..1)
+DAY_LEVEL = 0.75              # brightness factor by day (0..1)
+NIGHT_LEVEL = 0.15            # brightness factor at night (0..1)
 REFRESH_S = 2
 ROTATE = Image.Transpose.ROTATE_270   # = 90 deg clockwise; use ROTATE_90 to flip
 STALE_S = 15
@@ -523,7 +524,7 @@ def main():
     time.sleep(0.5)
     while True:
         now = datetime.now().astimezone()
-        level = NIGHT_LEVEL if is_night(now.astimezone(timezone.utc)) else 1.0
+        level = NIGHT_LEVEL if is_night(now.astimezone(timezone.utc)) else DAY_LEVEL
         if os.environ.get("HEMS_FORCE_LEVEL"):
             level = float(os.environ["HEMS_FORCE_LEVEL"])
         to_fb(render(poll(), r.sample(), now), level)

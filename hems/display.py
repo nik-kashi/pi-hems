@@ -377,7 +377,7 @@ def energy_section(d, v):
         tile(d, "battery", "Battery", icon_battery, GREEN, "--", " %", "", False)
     stacked_tile(d, "grid", "Grid", icon_grid, BLUE,
                  p1["grid_w"] if p1 else None, "import" if (p1 and p1["grid_w"] >= 0) else "export",
-                 p1["phases_w"] if p1 else [], PHASE_COL, PHASE_TXT, p1_ok, names=["L1", "L2", "L3"])
+                 p1["phases_w"] if p1 else [], PHASE_COL, PHASE_TXT, p1_ok)
     tile(d, "home", "Home", icon_home, WHITE, f"{home}" if home is not None else "--", " W",
          "consumption", home is not None)
 

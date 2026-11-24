@@ -374,7 +374,7 @@ def price_section(d, y):
     cur = tibber.current()
     ok = cur is not None
     d.rounded_rectangle((12, y, W - 12, y + 76), 12, fill=TILE, outline=PURPLE if ok else (70, 76, 90), width=2)
-    label = "Price ct/kWh"
+    label = "Price ¢/kWh"
     d.text((24, y + 8), label, font=font(13), fill=PURPLE if ok else MUTED)
     if not ok:
         d.text((W - 24, y + 12), "no price data", font=font(10), fill=RED, anchor="ra")

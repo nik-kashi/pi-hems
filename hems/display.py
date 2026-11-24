@@ -203,6 +203,17 @@ def price_chart(d, x, y, h):
         d.rectangle((x0, round(y + h - bh), x0 + px - 1, y + h), fill=col)
 
 
+def chart_legend(d, x, baseline):
+    """Small colour key under the price chart."""
+    items = [("charge", tuple(int(c * 0.8) for c in MODE_COL["CHARGE"])),
+             ("discharge", tuple(int(c * 0.8) for c in MODE_COL["DISCHARGE"])),
+             ("bypass", (120, 70, 125))]
+    for name, col in items:
+        d.rectangle((x, baseline - 8, x + 7, baseline - 1), fill=col)
+        d.text((x + 11, baseline), name, font=f_xs, fill=MUTED, anchor="ls")
+        x += 11 + int(d.textlength(name, font=f_xs)) + 12
+
+
 def render(values, res, now):
     img = Image.new("RGB", (W, H), BG)
     d = ImageDraw.Draw(img)
@@ -218,10 +229,14 @@ def render(values, res, now):
             d.text((W - 26, y + 12), "offline", font=f_xs, fill=(255, 120, 100), anchor="ra")
         d.text((W - 26, y + th - 30), val, font=f_big if len(val) < 9 else f_mid,
                fill=FG if ok else MUTED, anchor="rs")
-        if sub:
-            d.text((26, y + th - 12), sub, font=f_xs, fill=MUTED, anchor="ls")
         if label.startswith("Price") and ok:
             price_chart(d, 26, y + 30, 22)
+            if sub:   # price level goes on the label line
+                lx = 26 + int(d.textlength(label, font=f_sm)) + 8
+                d.text((lx, y + 13), "· " + sub, font=f_xs, fill=MUTED)
+            chart_legend(d, 26, y + th - 12)
+        elif sub:
+            d.text((26, y + th - 12), sub, font=f_xs, fill=MUTED, anchor="ls")
         y += th + 6
 
     plan_box(d, y)

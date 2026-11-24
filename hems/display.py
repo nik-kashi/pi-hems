@@ -401,8 +401,8 @@ def energy_section(d, v):
 
 def price_chart(d, x, y, h):
     """15-minute prices for today, plus tomorrow once published.
-    Today only: 2 px per slot. Today + tomorrow: 1 px per slot with a midnight
-    marker. Past slots dark, current slot white, future slots coloured by plan."""
+    Today only: 2 px per slot. Today + tomorrow: 1 px per slot with a 2 px
+    gap at midnight. Past slots dark, current slot white, future slots coloured by plan."""
     now = datetime.now().astimezone()
     days = [now.date(), now.date() + timedelta(days=1)]
     slots = [(t, p) for t, p, _ in tibber.slots() if t.date() in days]
@@ -414,12 +414,11 @@ def price_chart(d, x, y, h):
     lo, hi = min(vals), max(vals)
     span = max(hi - lo, 1e-6)
     plan_modes = {sl["start"]: sl["mode"] for sl in (load_plan() or {}).get("slots", [])}
-    if two_days:
-        d.line((x + 96, y - 2, x + 96, y + h), fill=(70, 76, 90))
     for t, p in slots:
-        i = (t.date() - days[0]).days * 96 + t.hour * 4 + t.minute // 15
+        day = (t.date() - days[0]).days
+        i = day * 96 + t.hour * 4 + t.minute // 15
         bh = 3 + (h - 3) * (p - lo) / span
-        x0 = x + px * i
+        x0 = x + px * i + 2 * day          # 2 px gap at midnight
         end = t + timedelta(minutes=15)
         if t <= now < end:
             col = CHART_COL["now"]

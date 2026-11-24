@@ -31,7 +31,7 @@ END_VALUE_QUANTILE = 0.25    # value of energy left at horizon end: this price
 # --- executor ----------------------------------------------------------------
 # DRY_RUN = compute and log commands, never send them. Keep True while the
 # Zendure app's own mode (Zenki) is still in control.
-EXECUTOR_DRY_RUN = True
+EXECUTOR_DRY_RUN = False
 EXEC_INTERVAL_S = 2          # control loop period
 WRITE_MIN_INTERVAL_S = 4     # min time between power-limit writes (device lag)
 TARGET_GRID_W = 30           # discharge aims for this much import (never export)

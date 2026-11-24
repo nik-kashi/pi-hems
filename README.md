@@ -82,7 +82,7 @@ The planner solves this over the whole known price horizon (up to ~44 h after
 - [ ] Measured efficiencies and confirmed battery capacity / wear cost
 - [x] Executor (dry-run): commands logged, not sent
 - [x] P1 export sign verified (export = negative `total_power`)
-- [ ] Go live: app mode without control (not Zenki / self-consumption), `EXECUTOR_DRY_RUN = False`
+- [x] Live since 2026-11-24 13:34 (Zendure app: custom mode, all schedules deleted)
 - [ ] Load forecast instead of fixed house load
 
 ## Findings
@@ -91,6 +91,7 @@ The planner solves this over the whole known price horizon (up to ~44 h after
   mode the device's own loop writes `acMode`/`outputLimit` (with `smartMode=1`)
   and overrides local BYPASS within ~12 s and CHARGE within ~22 s. A hybrid
   (app self-consumption + local charge/hold) is not possible; the app must be
-  in a mode that does not control the battery. (Test 2026-11-24, `tools/zcheck.py`.)
+  in a mode that does not control the battery. **Custom mode with all
+  schedules deleted works**: local commands hold. (Test 2026-11-24, `tools/zcheck.py`.)
 - Native self-consumption reacts to load steps in 10-20 s and keeps the grid
   within about +-15 W in steady state.

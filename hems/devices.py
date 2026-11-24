@@ -28,6 +28,7 @@ def read_solarflow():
     return {
         "soc": p["electricLevel"],                 # %
         "solar_w": p["solarInputPower"],
+        "strings_w": [p[f"solarPower{i}"] for i in range(1, 7) if f"solarPower{i}" in p],
         "bat_charge_w": p["outputPackPower"],      # into the packs
         "bat_discharge_w": p["packInputPower"],    # out of the packs
         "grid_to_bat_w": p["gridInputPower"],      # AC charging from grid

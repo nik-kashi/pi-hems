@@ -288,56 +288,60 @@ def tile(d, key, label, icon, col, value, unit, sub, ok, sub_col=MUTED):
 
 PHASE_COL = [(168, 212, 255), (90, 160, 255), (44, 95, 184)]   # L1 light, L2 mid, L3 dark blue
 PHASE_TXT = [(168, 212, 255), (90, 160, 255), (111, 155, 230)]  # L3 label lighter for contrast
+STRING_COL = [(255, 236, 160), (255, 212, 90), (235, 170, 30), (190, 125, 10), (150, 95, 5), (120, 75, 5)]
+STRING_TXT = [(255, 236, 160), (255, 212, 90), (235, 170, 30), (215, 150, 40), (200, 140, 40), (190, 130, 40)]
 
 
-def grid_tile(d, p1, ok):
-    """Grid tile: net total in W, stacked bar of each phase's share, W per phase.
-    An exporting phase (negative value) is drawn in yellow with a minus sign."""
-    x, y = POS["grid"]
-    col = BLUE if ok else MUTED
-    d.rounded_rectangle((x, y, x + TW, y + TH), 12, fill=TILE, outline=BLUE if ok else (70, 76, 90), width=2)
-    icon_grid(d, x + 10, y + 10, col)
-    d.text((x + 30, y + 9), "Grid", font=font(13), fill=col)
-    if p1 is None:
+def stacked_tile(d, key, label, icon, col, total, tag, parts, part_col, part_txt, ok, names=None):
+    """Tile with a net total in W, a stacked bar of each part's share and the W
+    value per part underneath. A negative part (export) is drawn in yellow with
+    a minus sign. `names` prefixes each value (e.g. L1); None = colour only."""
+    x, y = POS[key]
+    c = col if ok else MUTED
+    d.rounded_rectangle((x, y, x + TW, y + TH), 12, fill=TILE, outline=col if ok else (70, 76, 90), width=2)
+    icon(d, x + 10, y + 10, c)
+    d.text((x + 30, y + 9), label, font=font(13), fill=c)
+    if total is None:
         d.text((x + TW - 10, y + 52), "--", font=font(22, True), fill=MUTED, anchor="rs")
         return
-    g = p1["grid_w"]
-    lx = x + 30 + text_w(d, "Grid", font(13)) + 5
     if not ok:
         d.text((x + TW - 10, y + 12), "offline", font=font(10), fill=RED, anchor="ra")
-    else:
-        d.text((lx, y + 13), "import" if g >= 0 else "export", font=font(9), fill=MUTED)
+    elif tag:
+        d.text((x + 30 + text_w(d, label, font(13)) + 5, y + 13), tag, font=font(9), fill=MUTED)
     fv, fu = font(22, True), font(12)
     uw = text_w(d, " W", fu)
     d.text((x + TW - 10, y + 52), " W", font=fu, fill=FG if ok else MUTED, anchor="rs")
-    d.text((x + TW - 10 - uw, y + 52), f"{abs(g)}", font=fv, fill=FG if ok else MUTED, anchor="rs")
+    d.text((x + TW - 10 - uw, y + 52), f"{abs(total)}", font=fv, fill=FG if ok else MUTED, anchor="rs")
 
     # stacked share bar
-    phases = p1["phases_w"]
     bx0, bx1, by = x + 10, x + TW - 10, y + 60
     d.rounded_rectangle((bx0, by, bx1, by + 6), 3, fill=(40, 46, 60))
-    total = sum(abs(v) for v in phases)
-    if total > 0:
+    tot = sum(abs(v) for v in parts)
+    if tot > 0:
         cx = bx0
-        for k, v in enumerate(phases):
-            w = (bx1 - bx0) * abs(v) / total
+        for k, v in enumerate(parts):
+            w = (bx1 - bx0) * abs(v) / tot
             if w >= 0.5:
-                d.rectangle((round(cx), by, round(cx + w) - 1, by + 5), fill=YELLOW if v < 0 else PHASE_COL[k])
+                d.rectangle((round(cx), by, round(cx + w) - 1, by + 5), fill=YELLOW if v < 0 else part_col[k])
             cx += w
-    # values
+    # values, spread evenly: first left-aligned, last right-aligned
     f = font(9)
-    for k, v in enumerate(phases):
-        name, val = f"L{k + 1}", f"{v}" if v >= 0 else f"−{abs(v)}"
-        wn, wv = text_w(d, name + " ", f), text_w(d, val, f)
-        if k == 0:
+    n = len(parts)
+    labels = []
+    for k, v in enumerate(parts):
+        name = f"{names[k]} " if names else ""
+        val = f"{v}" if v >= 0 else f"−{abs(v)}"
+        labels.append((name, val, text_w(d, name, f), text_w(d, val, f), v))
+    for k, (name, val, wn, wv, v) in enumerate(labels):
+        if n == 1:
             tx = bx0
-        elif k == 1:
-            tx = (bx0 + bx1) / 2 - (wn + wv) / 2
         else:
-            tx = bx1 - wn - wv
-        ncol = YELLOW if v < 0 else PHASE_TXT[k]
-        d.text((tx, y + 80), name, font=f, fill=ncol, anchor="ls")
-        d.text((tx + wn, y + 80), val, font=f, fill=YELLOW if v < 0 else FG, anchor="ls")
+            centre = bx0 + (bx1 - bx0) * k / (n - 1)
+            tx = min(max(centre - (wn + wv) / 2, bx0), bx1 - wn - wv)
+        neg = v < 0
+        if name:
+            d.text((tx, y + 80), name, font=f, fill=YELLOW if neg else part_txt[k], anchor="ls")
+        d.text((tx + wn, y + 80), val, font=f, fill=YELLOW if neg else (FG if name else part_txt[k]), anchor="ls")
 
 
 def energy_section(d, v):
@@ -356,8 +360,10 @@ def energy_section(d, v):
 
     # tiles
     if sf:
-        tile(d, "solar", "Solar", lambda dd, x, y, c: icon_sun(dd, x + 7, y + 7, c, r=3, ray=6.5),
-             YELLOW, f"{sf['solar_w']}", " W", "" if sf["solar_w"] >= FLOW_MIN_W else "no sun", sf_ok)
+        strings = sf.get("strings_w", [])
+        stacked_tile(d, "solar", "Solar", lambda dd, x, y, c: icon_sun(dd, x + 7, y + 7, c, r=3, ray=6.5),
+                     YELLOW, sf["solar_w"], f"{len(strings)} strings" if strings else "",
+                     strings, STRING_COL, STRING_TXT, sf_ok)
         if sf["bat_charge_w"] > 0:
             bsub = f"charging {sf['bat_charge_w']} W"
         elif sf["bat_discharge_w"] > 0:
@@ -369,7 +375,9 @@ def energy_section(d, v):
         tile(d, "solar", "Solar", lambda dd, x, y, c: icon_sun(dd, x + 7, y + 7, c, r=3, ray=6.5),
              YELLOW, "--", " W", "", False)
         tile(d, "battery", "Battery", icon_battery, GREEN, "--", " %", "", False)
-    grid_tile(d, p1, p1_ok)
+    stacked_tile(d, "grid", "Grid", icon_grid, BLUE,
+                 p1["grid_w"] if p1 else None, "import" if (p1 and p1["grid_w"] >= 0) else "export",
+                 p1["phases_w"] if p1 else [], PHASE_COL, PHASE_TXT, p1_ok, names=["L1", "L2", "L3"])
     tile(d, "home", "Home", icon_home, WHITE, f"{home}" if home is not None else "--", " W",
          "consumption", home is not None)
 

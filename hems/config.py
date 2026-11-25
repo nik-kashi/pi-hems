@@ -15,7 +15,13 @@ CHARGE_MAX_W = 2000          # AC grid charging limit
 DISCHARGE_MAX_W = 1600       # AC output limit
 ETA_CHARGE = 0.93            # AC -> cells   (to be replaced by measured value)
 ETA_DISCHARGE = 0.93         # cells -> AC   (to be replaced by measured value)
-WEAR_EUR_PER_KWH = 0.03      # battery wear per kWh taken out of the battery (AC)
+# wear per kWh delivered (AC) = price / lifetime energy. The EUR 2500 paid also
+# covers the solar panels; the battery share is an assumption.
+BATTERY_PRICE_EUR = 2000
+BATTERY_CYCLES = 6000        # Zendure rating
+AVG_HEALTH = 0.85            # average remaining capacity over its life
+WEAR_EUR_PER_KWH = round(BATTERY_PRICE_EUR / (CAPACITY_KWH * (MAX_SOC - MIN_SOC) / 100
+                                              * BATTERY_CYCLES * AVG_HEALTH * ETA_DISCHARGE), 3)
 
 # --- house -------------------------------------------------------------------
 # Expected house load per slot. Heat pump keeps load above the discharge limit

@@ -77,7 +77,8 @@ The planner solves this over the whole known price horizon (up to ~44 h after
    ```bash
    ssh -t root@<pi> 'read -rsp "Tibber token: " t; echo; umask 077; mkdir -p /etc/hems; printf "TIBBER_TOKEN=%s\n" "$t" > /etc/hems/secrets.env'
    ```
-6. Adjust device IPs in `hems/devices.py` and `hems/logger.py`, then `./deploy.sh root@<pi>`.
+6. Set the device IPs in `hems/config.py` as a starting point (they are rediscovered
+   automatically if they change), then `./deploy.sh root@<pi>`.
 
 ## Status
 
@@ -101,5 +102,8 @@ The planner solves this over the whole known price horizon (up to ~44 h after
 - The TFT backlight is wired permanently on (GPIO22 has no effect), so
   night mode can only dim the image, not switch the backlight off. HDMI
   output is switched off at boot (`hems-hdmi-off`).
+- Device IPs can change on DHCP renewal (the P1 meter moved overnight).
+  `devices.py` rescans the /24 after 3 failed reads and shares the new
+  address via `/run/hems/addresses.json`. DHCP reservations are still advised.
 - Native self-consumption reacts to load steps in 10-20 s and keeps the grid
   within about +-15 W in steady state.

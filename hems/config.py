@@ -1,8 +1,8 @@
 """Shared HEMS settings. All tunables live here."""
 
 # --- devices (local network) ---------------------------------------------
-SOLARFLOW = "http://192.168.2.32"
-P1_METER = "http://192.168.2.34"
+SOLARFLOW = "http://192.168.2.32"    # starting point; devices.py rediscovers on change
+P1_METER = "http://192.168.2.10"     # starting point; devices.py rediscovers on change
 
 # --- location (approximate, for sunrise/sunset only) -------------------------
 LAT, LON = 52.1, 5.1

@@ -22,7 +22,7 @@ import time
 import urllib.request
 from datetime import datetime
 
-from config import SOLARFLOW, P1_METER
+import devices
 SAMPLE_S = 5
 MAX_GAP_S = 30            # don't integrate across gaps longer than this
 DATA_DIR = "/var/lib/hems"
@@ -49,7 +49,7 @@ def s16(v):
 
 
 def sample():
-    sf = get(SOLARFLOW)
+    sf = devices.solarflow_report()
     p = sf["properties"]
     # measured DC power at the cells, + = charging, - = discharging
     dc = sum(x["totalVol"] / 100 * s16(x["batcur"]) / 10 for x in sf["packData"])
@@ -67,7 +67,7 @@ def sample():
         "grid": None,
     }
     try:
-        s["grid"] = get(P1_METER)["total_power"]
+        s["grid"] = devices.p1_report()["total_power"]
     except Exception:
         pass
     return s

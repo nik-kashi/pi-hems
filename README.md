@@ -65,14 +65,15 @@ The planner solves this over the whole known price horizon (up to ~44 h after
 | `config.py` | All tunables: device IPs, battery capacity/limits, efficiencies, wear cost, shadow mode |
 | `planner.py` | Linear-program battery plan over all known 15-min prices: CHARGE / BYPASS / DISCHARGE per slot; `hems-plan` prints it |
 | `executor.py` | Turns the current plan slot into SolarFlow commands (`acMode`, `inputLimit`, `outputLimit`, always `smartMode=1`); zero-export load follower while discharging; dry-run by default |
-| `web.py` + `web/index.html` | Read-only web page on port 80 (`http://<pi>/`): energy flow, prices + plan, executor, system; JSON at `/api/state` |
+| `web.py` + `web/index.html` | Read-only web page on port 80 (`http://hems.local/`): energy flow, prices + plan, executor, system; JSON at `/api/state` |
 | `report.py` | `hems-report [YYYY-MM-DD]`: measured charge/discharge efficiency, round trip, standby drain |
 
 ## Setup
 
 1. Flash DietPi (RPi 2/3/4 ARMv8 image), headless, Ethernet, SSH key.
 2. Append `boot/config.txt.snippet` to `/boot/firmware/config.txt`, reboot.
-3. `apt install python3 python3-pil python3-numpy fonts-dejavu-core`
+3. `apt install python3 python3-pil python3-numpy python3-scipy fonts-dejavu-core avahi-daemon`
+   (avahi makes the Pi reachable as `hems.local`)
 4. Enable the Zendure local API in the Zendure app (add HEMS).
 5. Store the Tibber token on the Pi (root-only, never in git):
    ```bash

@@ -7,8 +7,10 @@
 Everything comes from files the other services already write, so the web
 page never talks to the devices itself. There are no write endpoints.
 """
+import ipaddress
 import json
 import os
+import socket
 import time
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -48,6 +50,34 @@ def api_state():
     return out
 
 
+def _local_client(addr):
+    """Only answer the home network. IPv6 addresses are globally routable, so
+    accept those only from the Pi's own /64 networks."""
+    ip = ipaddress.ip_address(addr.split("%")[0])
+    ip = getattr(ip, "ipv4_mapped", None) or ip
+    if ip.is_loopback or ip.is_link_local:
+        return True
+    if ip.version == 4:
+        return ip.is_private
+    try:
+        with open("/proc/net/if_inet6") as f:
+            return any(ip in ipaddress.ip_network((int(l.split()[0], 16) >> 64 << 64, 64)) for l in f)
+    except OSError:
+        return False
+
+
+class Server(ThreadingHTTPServer):
+    address_family = socket.AF_INET6
+    daemon_threads = True
+
+    def server_bind(self):
+        self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)   # IPv4 too
+        super().server_bind()
+
+    def verify_request(self, request, client_address):
+        return _local_client(client_address[0])
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "hems-web"
 
@@ -75,4 +105,4 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     print(f"hems-web on port {PORT}", flush=True)
-    ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+    Server(("::", PORT), Handler).serve_forever()

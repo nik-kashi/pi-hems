@@ -40,11 +40,13 @@ DEADBAND_W = 15              # ignore smaller output corrections
 # below the fuse for power factor, low mains voltage and reaction time
 BATTERY_PHASE = 2            # index into phases_w: L3
 FUSE_A = 25
-SAFE_A = 22
+SAFE_A = 24
 LINE_V = 230
-SAFE_PHASE_W = SAFE_A * LINE_V   # 5060 W
+SAFE_PHASE_W = SAFE_A * LINE_V   # 5520 W
 GUARD_WINDOW_S = 30          # use the highest other load seen in this window
 GUARD_MIN_DATA_S = 10        # data needed before charging may start
 GUARD_RAISE_S = 30           # min time between raising the charge power
+GUARD_DEADBAND_W = 50        # ignore smaller corrections
+GUARD_AC_LAG_S = 6           # the P1 may still show battery power from this long ago
 P1_STALE_S = 10              # older P1 data -> stop discharging
 PLAN_STALE_S = 20 * 60       # older plan -> BYPASS

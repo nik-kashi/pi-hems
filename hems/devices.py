@@ -127,6 +127,7 @@ def read_p1():
     return {
         "grid_w": d["total_power"],
         "phases_w": [d["a_aprt_power"], d["b_aprt_power"], d["c_aprt_power"]],
+        "msg": d.get("messageId"),                 # advances with every new reading
         "ts": time.time(),
     }
 

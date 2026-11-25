@@ -64,6 +64,7 @@ The planner solves this over the whole known price horizon (up to ~44 h after
 | `logger.py` | Samples every 5 s, writes 15-min energy totals split by operating mode to `/var/lib/hems/energy-YYYY-MM.csv` |
 | `config.py` | All tunables: device IPs, battery capacity/limits, efficiencies, wear cost, shadow mode |
 | `planner.py` | Linear-program battery plan over all known 15-min prices: CHARGE / BYPASS / DISCHARGE per slot; `hems-plan` prints it |
+| `guard.py` | Fuse guard: limits grid charging to the spare capacity on the battery's phase (L3, 22 A of 25 A); no P1 data = no grid charging |
 | `executor.py` | Turns the current plan slot into SolarFlow commands (`acMode`, `inputLimit`, `outputLimit`, always `smartMode=1`); zero-export load follower while discharging; dry-run by default |
 | `web.py` + `web/index.html` | Read-only web page on port 80 (`http://hems.local/`): energy flow, prices + plan, executor, system; JSON at `/api/state` |
 | `report.py` | `hems-report [YYYY-MM-DD]`: measured charge/discharge efficiency, round trip, standby drain |

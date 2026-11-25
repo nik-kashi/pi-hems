@@ -16,7 +16,8 @@ delay) before correcting again; changes smaller than DEADBAND_W are skipped.
 Safety:
   - plan missing/stale        -> BYPASS
   - P1 data stale             -> no discharge (output 0)
-  - any phase > PHASE_LIMIT_W -> grid charge reduced by the excess
+  - CHARGE is limited to the spare capacity on the battery's phase, and
+    stops without P1 data (guard.py)
   - SIGTERM / exit            -> BYPASS
 With EXECUTOR_DRY_RUN=True nothing is sent; commands are only logged.
 """
@@ -29,6 +30,7 @@ from datetime import datetime
 
 import config as C
 import devices
+from guard import ChargeGuard
 
 PLAN_FILE = "/run/hems/plan.json"
 STATE_FILE = "/run/hems/executor.json"
@@ -64,6 +66,7 @@ class Executor:
         self.last_write = 0.0
         self.mode = None
         self.out_cmd = 0          # our own running output setpoint
+        self.guard = ChargeGuard()
 
     # -- device io ----------------------------------------------------------
     def send(self, props, why):
@@ -92,7 +95,7 @@ class Executor:
 
         # device reboot restores flash values -> re-assert smartMode
         if p.get("smartMode") != 1 and not self.dry:
-            self.sent.pop("smartMode", None)
+            self.sent.clear()      # limits were reset too, send everything again
         self.send({"smartMode": 1}, "no flash writes")
 
         try:
@@ -100,6 +103,9 @@ class Executor:
             p1_ok = time.time() - p1["ts"] < C.P1_STALE_S
         except Exception:
             p1, p1_ok = None, False
+
+        self.guard.observe(time.time(), p1["phases_w"][C.BATTERY_PHASE] if p1 else None,
+                           p1["msg"] if p1 else None, p["gridInputPower"], p["outputHomePower"])
 
         mode, planned_w, why = current_slot()
         if mode != self.mode:
@@ -109,11 +115,8 @@ class Executor:
 
         if mode == "CHARGE":
             limit = min(planned_w, C.CHARGE_MAX_W)
-            if p1_ok:
-                excess = max(p1["phases_w"]) - C.PHASE_LIMIT_W
-                if excess > 0:
-                    limit = max(0, limit - excess)
-                    why = f"phase limit, -{excess} W"
+            limit, gwhy = self.guard.allow(time.time(), limit)
+            why = gwhy if gwhy != "plan" else why
             self.send({"acMode": 1, "outputLimit": 0, "inputLimit": int(limit)}, why)
 
         elif mode == "DISCHARGE":

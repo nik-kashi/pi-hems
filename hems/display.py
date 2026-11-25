@@ -516,6 +516,28 @@ def to_fb(img, level):
         fb.write(rgb565.astype("<u2").tobytes())
 
 
+STATE_FILE = "/run/hems/state.json"
+
+
+def publish_state(values, res):
+    """Snapshot for the web page (RAM only)."""
+    p1, sf = values.get("p1"), values.get("sf")
+    p1_ok, sf_ok = _fresh(p1), _fresh(sf)
+    f, home = flows(p1 if p1_ok else None, sf if sf_ok else None)
+    state = {"ts": time.time(), "p1": p1 if p1_ok else None, "sf": sf if sf_ok else None,
+             "flows": f, "home_w": home, "res": res, "weather": weather.current()}
+    if state["weather"]:
+        state["weather"] = dict(state["weather"], kind=weather.kind(state["weather"]["code"]))
+    try:
+        os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
+        tmp = STATE_FILE + ".tmp"
+        with open(tmp, "w") as fh:
+            json.dump(state, fh)
+        os.replace(tmp, STATE_FILE)
+    except OSError:
+        pass
+
+
 def main():
     tibber.start()
     weather.start()
@@ -526,7 +548,9 @@ def main():
         level = NIGHT_LEVEL if is_night(now.astimezone(timezone.utc)) else DAY_LEVEL
         if os.environ.get("HEMS_FORCE_LEVEL"):
             level = float(os.environ["HEMS_FORCE_LEVEL"])
-        to_fb(render(poll(), r.sample(), now), level)
+        values, res = poll(), r.sample()
+        publish_state(values, res)
+        to_fb(render(values, res, now), level)
         time.sleep(REFRESH_S)
 
 

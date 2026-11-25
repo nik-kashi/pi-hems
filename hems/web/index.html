@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0c1018">
+<title>HEMS</title>
+<style>
+  :root {
+    --bg: #0c1018; --card: #151a26; --tile: #1a202e; --line: #262d3d;
+    --fg: #f0f0f0; --muted: #8c96aa; --red: #ff7864;
+    --solar: #ffc83c; --grid: #5aa0ff; --battery: #50d278; --home: #dfe4ee; --price: #dc78dc;
+    --charge: #40a860; --discharge: #cc7830; --bypass: #78467d; --past: #4b3250; --now: #ffebff;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 1080px; margin: 0 auto; padding: 16px; display: grid; gap: 16px;
+         grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); align-items: start; }
+  header { max-width: 1080px; margin: 0 auto; padding: 16px 16px 0; display: flex;
+           align-items: center; gap: 12px; flex-wrap: wrap; }
+  header h1 { margin: 0; font-size: 22px; }
+  #clock { color: var(--muted); }
+  #weather { margin-left: auto; font-size: 18px; font-weight: 700; }
+  #updated { width: 100%; font-size: 12px; color: var(--muted); }
+  #updated.stale { color: var(--red); }
+  .card { background: var(--card); border-radius: 14px; padding: 16px; min-width: 0; }
+  .card h2 { margin: 0 0 12px; font-size: 13px; font-weight: 600; letter-spacing: .04em;
+             text-transform: uppercase; color: var(--muted); }
+  svg { display: block; width: 100%; height: auto; }
+  .row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .big { font-size: 40px; font-weight: 700; line-height: 1; }
+  .unit { font-size: 16px; font-weight: 400; color: var(--muted); }
+  .muted { color: var(--muted); }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; margin-right: 5px; vertical-align: -1px; }
+  .mode { font-size: 22px; font-weight: 700; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  td { padding: 6px 4px; border-top: 1px solid var(--line); }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .bars { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+  .bar { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; margin: 6px 0 4px; }
+  .bar > div { height: 100%; border-radius: 4px; }
+  dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin: 0; font-size: 14px; }
+  dt { color: var(--muted); }
+  dd { margin: 0; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<header>
+  <h1>HEMS</h1>
+  <span id="clock">–</span>
+  <span id="weather"></span>
+  <span id="updated">connecting…</span>
+</header>
+<main>
+  <section class="card" aria-labelledby="h-flow">
+    <h2 id="h-flow">Energy flow</h2>
+    <div id="flow"></div>
+  </section>
+
+  <section class="card" aria-labelledby="h-price">
+    <h2 id="h-price">Price</h2>
+    <div class="row">
+      <div><span class="big" id="price">–</span> <span class="unit">¢/kWh</span></div>
+      <span class="muted" id="level"></span>
+    </div>
+    <div id="chart" style="margin-top: 12px;"></div>
+    <div class="legend">
+      <span><i style="background: var(--charge)"></i>charge</span>
+      <span><i style="background: var(--discharge)"></i>discharge</span>
+      <span><i style="background: var(--bypass)"></i>bypass</span>
+      <span><i style="background: var(--now)"></i>now</span>
+    </div>
+  </section>
+
+  <section class="card" aria-labelledby="h-plan">
+    <h2 id="h-plan">Plan</h2>
+    <div class="row">
+      <span class="mode" id="mode">–</span>
+      <span class="muted" id="net"></span>
+    </div>
+    <p class="muted" id="plansum" style="margin: 6px 0 10px;"></p>
+    <table><tbody id="segments"></tbody></table>
+  </section>
+
+  <section class="card" aria-labelledby="h-exec">
+    <h2 id="h-exec">Executor</h2>
+    <dl id="exec"></dl>
+  </section>
+
+  <section class="card" aria-labelledby="h-sys">
+    <h2 id="h-sys">System</h2>
+    <div class="bars" id="sys"></div>
+  </section>
+</main>
+
+<script>
+const C = { solar: '#ffc83c', grid: '#5aa0ff', battery: '#50d278', home: '#dfe4ee',
+            tile: '#1a202e', line: '#262d3d', fg: '#f0f0f0', muted: '#8c96aa', bg: '#0c1018', red: '#ff7864',
+            CHARGE: '#40a860', DISCHARGE: '#cc7830', BYPASS: '#78467d', past: '#4b3250', now: '#ffebff' };
+const MODE = { CHARGE: '#50d278', DISCHARGE: '#ff963c', BYPASS: '#96a0b4' };
+const PHASE = ['#a8d4ff', '#5aa0ff', '#2c5fb8'];
+const STRING = ['#ffeca0', '#ffd45a', '#ebaa1e', '#be7d0a', '#965f05', '#784b05'];
+const WX = { clear: ['☀️', '🌙'], partly: ['⛅', '☁️'], cloudy: ['☁️', '☁️'], fog: ['🌫️', '🌫️'],
+             rain: ['🌧️', '🌧️'], snow: ['🌨️', '🌨️'], thunder: ['⛈️', '⛈️'] };
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const hm = iso => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+const isToday = iso => new Date(iso).toDateString() === new Date().toDateString();
+const day = iso => new Date(iso).toLocaleDateString([], { weekday: 'short' });
+
+// ---------- energy flow (same geometry as the TFT) ----------
+const POS = { solar: [12, 44], grid: [192, 44], battery: [12, 180], home: [192, 180] };
+function tile(key, label, col, value, unit, ok, extra) {
+  const [x, y] = POS[key];
+  const c = ok ? col : C.muted;
+  return `<rect x="${x}" y="${y}" width="116" height="92" rx="12" fill="${C.tile}" stroke="${ok ? col : '#464c5a'}" stroke-width="2"/>
+    <text x="${x + 10}" y="${y + 20}" fill="${c}" font-size="13">${label}${extra && extra.tag ? `<tspan fill="${C.muted}" font-size="9"> ${esc(extra.tag)}</tspan>` : ''}</text>
+    ${ok ? '' : `<text x="${x + 106}" y="${y + 20}" fill="${C.red}" font-size="10" text-anchor="end">offline</text>`}
+    <text x="${x + 106}" y="${y + (extra && extra.parts ? 52 : 60)}" text-anchor="end" fill="${ok ? C.fg : C.muted}"
+      font-size="${extra && extra.parts ? 22 : 26}" font-weight="700">${esc(value)}<tspan font-size="13" font-weight="400"> ${unit}</tspan></text>
+    ${extra && extra.sub ? `<text x="${x + 10}" y="${y + 82}" fill="${C.muted}" font-size="11">${esc(extra.sub)}</text>` : ''}
+    ${extra && extra.parts ? stacked(x, y, extra.parts, extra.cols) : ''}`;
+}
+function stacked(x, y, parts, cols) {
+  const tot = parts.reduce((a, v) => a + Math.abs(v), 0);
+  let out = `<rect x="${x + 10}" y="${y + 60}" width="96" height="6" rx="3" fill="#282e3c"/>`;
+  let cx = x + 10;
+  parts.forEach((v, k) => {
+    const w = tot ? 96 * Math.abs(v) / tot : 0;
+    if (w > 0.3) out += `<rect x="${cx}" y="${y + 60}" width="${w}" height="6" fill="${v < 0 ? C.solar : cols[k]}"/>`;
+    cx += w;
+  });
+  const n = parts.length;
+  parts.forEach((v, k) => {
+    const tx = n === 1 ? x + 10 : x + 10 + 96 * k / (n - 1);
+    const anchor = k === 0 ? 'start' : (k === n - 1 ? 'end' : 'middle');
+    out += `<text x="${tx}" y="${y + 80}" font-size="9" text-anchor="${anchor}" fill="${v < 0 ? C.solar : cols[k]}">${v < 0 ? '−' + Math.abs(v) : v}</text>`;
+  });
+  return out;
+}
+function arrow(x1, y1, x2, y2, col, on) {
+  if (!on) return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${C.line}" stroke-width="2"/>`;
+  const a = Math.atan2(y2 - y1, x2 - x1), hx = x2 - 7 * Math.cos(a), hy = y2 - 7 * Math.sin(a);
+  const l = [hx + 5 * Math.cos(a + Math.PI / 2), hy + 5 * Math.sin(a + Math.PI / 2)];
+  const r = [hx + 5 * Math.cos(a - Math.PI / 2), hy + 5 * Math.sin(a - Math.PI / 2)];
+  return `<line x1="${x1}" y1="${y1}" x2="${hx}" y2="${hy}" stroke="${col}" stroke-width="3"/>
+          <polygon points="${x2},${y2} ${l} ${r}" fill="${col}"/>`;
+}
+function pill(cx, cy, txt, col) {
+  const w = txt.length * 6.2 + 10;
+  return `<rect x="${cx - w / 2}" y="${cy - 7}" width="${w}" height="14" rx="7" fill="${C.bg}" stroke="${col}"/>
+          <text x="${cx}" y="${cy + 3.5}" font-size="10" font-weight="700" text-anchor="middle" fill="${col}">${txt}</text>`;
+}
+function renderFlow(s) {
+  const p1 = s && s.p1, sf = s && s.sf, f = (s && s.flows) || {};
+  const on = k => (f[k] || 0) >= 15;
+  let g = '';
+  g += arrow(132, 90, 188, 90, C.solar, on('solar_grid'));
+  g += arrow(132, 140, 188, 176, C.solar, on('solar_home'));
+  g += arrow(70, 139, 70, 175, C.solar, on('solar_battery'));
+  g += arrow(188, 140, 133, 175, C.grid, on('grid_battery'));
+  g += arrow(250, 139, 250, 175, C.grid, on('grid_home'));
+  g += arrow(131, 226, 187, 226, C.battery, on('battery_home'));
+  if (sf) {
+    const st = sf.strings_w || [];
+    g += tile('solar', 'Solar', C.solar, sf.solar_w, 'W', true, { tag: st.length ? `${st.length} strings` : '', parts: st, cols: STRING });
+    const bsub = sf.bat_charge_w > 0 ? `charging ${sf.bat_charge_w} W` : sf.bat_discharge_w > 0 ? `discharging ${sf.bat_discharge_w} W` : 'idle';
+    g += tile('battery', 'Battery', C.battery, sf.soc, '%', true, { sub: bsub });
+  } else {
+    g += tile('solar', 'Solar', C.solar, '–', 'W', false) + tile('battery', 'Battery', C.battery, '–', '%', false);
+  }
+  g += p1 ? tile('grid', 'Grid', C.grid, Math.abs(p1.grid_w), 'W', true,
+                 { tag: p1.grid_w >= 0 ? 'import' : 'export', parts: p1.phases_w, cols: PHASE })
+          : tile('grid', 'Grid', C.grid, '–', 'W', false);
+  g += tile('home', 'Home', C.home, s && s.home_w != null ? s.home_w : '–', 'W', s && s.home_w != null, { sub: 'consumption' });
+  if (on('solar_grid')) g += pill(160, 90, `${f.solar_grid} W`, C.solar);
+  if (on('solar_battery')) g += pill(70, 157, `${f.solar_battery} W`, C.solar);
+  if (on('grid_home')) g += pill(250, 157, `${f.grid_home} W`, C.grid);
+  if (on('battery_home')) g += pill(160, 226, `${f.battery_home} W`, C.battery);
+  const both = on('grid_battery') && on('solar_home');
+  if (on('grid_battery')) g += pill(160, both ? 150 : 158, `${f.grid_battery} W`, C.grid);
+  if (on('solar_home')) g += pill(160, both ? 167 : 158, `${f.solar_home} W`, C.solar);
+  document.getElementById('flow').innerHTML =
+    `<svg viewBox="4 36 312 244" role="img" aria-label="Energy flow between solar, grid, battery and home"
+          font-family="system-ui, sans-serif">${g}</svg>`;
+}
+
+// ---------- price chart ----------
+function renderPrices(prices, plan) {
+  const now = new Date();
+  const modes = {};
+  ((plan && plan.slots) || []).forEach(s => modes[new Date(s.start).getTime()] = s.mode);
+  const cur = prices.find(p => { const t = new Date(p.start); return t <= now && now < new Date(t.getTime() + 9e5); });
+  document.getElementById('price').textContent = cur ? Math.round(cur.price * 100) : '–';
+  document.getElementById('level').textContent = cur ? cur.level.replace('_', ' ').toLowerCase() : 'no price data';
+  if (!prices.length) { document.getElementById('chart').innerHTML = ''; return; }
+  const vals = prices.map(p => p.price), lo = Math.min(...vals), hi = Math.max(...vals), span = Math.max(hi - lo, 1e-6);
+  const H = 90, d0 = new Date(prices[0].start); d0.setHours(0, 0, 0, 0);
+  let bars = '', x = 0;
+  prices.forEach(p => {
+    const t = new Date(p.start), dayIdx = Math.round((new Date(t).setHours(0, 0, 0, 0) - d0) / 864e5);
+    const i = dayIdx * 96 + t.getHours() * 4 + Math.floor(t.getMinutes() / 15);
+    x = i * 3 + dayIdx * 6;
+    const h = 6 + (H - 6) * (p.price - lo) / span;
+    const end = new Date(t.getTime() + 9e5);
+    const col = (t <= now && now < end) ? C.now : end <= now ? C.past : (C[modes[t.getTime()]] || C.BYPASS);
+    bars += `<rect x="${x}" y="${H - h}" width="2.4" height="${h}" fill="${col}"><title>${day(p.start)} ${hm(p.start)}  ${(p.price * 100).toFixed(1)} ¢  ${modes[t.getTime()] || ''}</title></rect>`;
+  });
+  const W = x + 3;
+  const ticks = [];
+  for (let d = 0; d * 96 * 3 < W; d++) for (const hr of [0, 6, 12, 18]) {
+    const tx = (d * 96 + hr * 4) * 3 + d * 6;
+    if (tx < W - 20) ticks.push(`<span style="position:absolute;left:${(100 * tx / W).toFixed(2)}%">${hr === 0 ? (d === 0 ? 'today' : 'tomorrow') : String(hr).padStart(2, '0')}</span>`);
+  }
+  document.getElementById('chart').innerHTML =
+    `<div style="display:flex;gap:8px;align-items:stretch">
+       <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:110px;flex:1;min-width:0" role="img"
+            aria-label="15-minute prices, coloured by planned battery mode">${bars}</svg>
+       <div class="muted" style="display:flex;flex-direction:column;justify-content:space-between;font-size:11px;text-align:right">
+         <span>${(hi * 100).toFixed(0)}¢</span><span>${(lo * 100).toFixed(0)}¢</span></div>
+     </div>
+     <div class="muted" style="position:relative;height:16px;font-size:11px;margin-right:34px">${ticks.join('')}</div>`;
+}
+
+// ---------- plan ----------
+function renderPlan(plan) {
+  if (!plan) { document.getElementById('mode').textContent = 'no plan'; return; }
+  const s0 = plan.slots[0];
+  const m = document.getElementById('mode');
+  m.textContent = s0.mode + (s0.power_w ? ` ${s0.power_w} W` : '');
+  m.style.color = MODE[s0.mode];
+  document.getElementById('net').textContent = `€${(plan.grid_saving_eur - plan.wear_eur).toFixed(2)} net`;
+  document.getElementById('plansum').textContent =
+    `Charge ${plan.charged_kwh} kWh, discharge ${plan.discharged_kwh} kWh · battery now ${plan.soc_now}% · planned ${hm(plan.created)}` +
+    (plan.shadow ? ' · shadow mode' : '');
+  const segs = [];
+  plan.slots.forEach(s => {
+    const last = segs[segs.length - 1];
+    if (last && last.mode === s.mode) { last.end = s.start; last.prices.push(s.price); last.soc = s.soc_end; }
+    else segs.push({ mode: s.mode, start: s.start, end: s.start, prices: [s.price], soc: s.soc_end });
+  });
+  document.getElementById('segments').innerHTML = segs.slice(0, 10).map(g => {
+    const end = new Date(new Date(g.end).getTime() + 9e5).toISOString();
+    const pmin = Math.min(...g.prices) * 100, pmax = Math.max(...g.prices) * 100;
+    const when = (isToday(g.start) ? '' : day(g.start) + ' ') + `${hm(g.start)}–${hm(end)}`;
+    const pr = pmin.toFixed(0) === pmax.toFixed(0) ? `${pmin.toFixed(0)}¢` : `${pmin.toFixed(0)}–${pmax.toFixed(0)}¢`;
+    return `<tr><td style="white-space:nowrap">${when}</td>
+      <td><span class="pill" style="background:${MODE[g.mode]}22;color:${MODE[g.mode]}">${g.mode.toLowerCase()}</span></td>
+      <td class="num" style="white-space:nowrap">${pr}</td><td class="num" style="white-space:nowrap">→${Math.round(g.soc)}%</td></tr>`;
+  }).join('');
+}
+
+// ---------- executor & system ----------
+function renderExec(ex, st) {
+  const el = document.getElementById('exec');
+  if (!ex) { el.innerHTML = '<dt>status</dt><dd>not running</dd>'; return; }
+  const age = (st - ex.ts).toFixed(0);
+  const d = ex.device || {};
+  el.innerHTML = `<dt>mode</dt><dd style="color:${MODE[ex.mode] || C.fg}">${ex.mode}${ex.dry_run ? ' (dry run)' : ' · live'}</dd>
+    <dt>device</dt><dd>acMode ${d.acMode} · in ${d.inputLimit} W · out ${d.outputLimit} W · smartMode ${d.smartMode}</dd>
+    <dt>grid</dt><dd>${ex.grid_w != null ? ex.grid_w + ' W' : '–'}</dd>
+    <dt>last step</dt><dd${age > 15 ? ' style="color:#ff7864"' : ''}>${age} s ago</dd>`;
+}
+function renderSys(r) {
+  if (!r) return;
+  const item = (name, pct, col, sub) => `<div><div class="row"><span class="muted">${name}</span><span>${pct.toFixed(0)}%</span></div>
+    <div class="bar"><div style="width:${Math.min(100, pct)}%;background:${col}"></div></div><div class="muted" style="font-size:12px">${sub}</div></div>`;
+  const gb = v => (v >= 9.95 ? v.toFixed(0) : v.toFixed(1)) + ' GB';
+  document.getElementById('sys').innerHTML =
+    item('CPU', r.cpu, '#78b4ff', `${r.cores} cores · ${r.temp.toFixed(0)}°C`) +
+    item('RAM', r.ram, '#96dca0', 'of ' + gb(r.ram_gb)) +
+    item('Disk', r.disk, '#e6be78', 'of ' + gb(r.disk_gb));
+}
+
+// ---------- loop ----------
+async function tick() {
+  const up = document.getElementById('updated');
+  try {
+    const r = await fetch('/api/state', { cache: 'no-store' });
+    const d = await r.json();
+    const s = d.state;
+    const age = s ? d.server_time - s.ts : Infinity;
+    up.textContent = s ? `updated ${age.toFixed(0)} s ago` : 'no live data';
+    up.classList.toggle('stale', age > 15);
+    document.getElementById('clock').textContent =
+      new Date().toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+    const w = s && s.weather;
+    document.getElementById('weather').textContent = w ? `${(WX[w.kind] || WX.cloudy)[w.is_day ? 0 : 1]} ${Math.round(w.temp_c)}°C` : '';
+    renderFlow(s);
+    renderPrices(d.prices || [], d.plan);
+    renderPlan(d.plan);
+    renderExec(d.executor, d.server_time);
+    renderSys(s && s.res);
+  } catch (e) {
+    up.textContent = 'HEMS not reachable';
+    up.classList.add('stale');
+  }
+}
+tick();
+setInterval(tick, 3000);
+</script>
+</body>
+</html>

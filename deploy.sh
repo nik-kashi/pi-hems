@@ -7,6 +7,8 @@ cd "$(dirname "$0")"
 
 ssh "$HOST" 'mkdir -p /opt/hems /etc/hems'
 scp -q hems/*.py "$HOST":/opt/hems/
+ssh "$HOST" "mkdir -p /opt/hems/web"
+scp -q hems/web/* "$HOST":/opt/hems/web/
 scp -q systemd/*.service "$HOST":/etc/systemd/system/
 scp -q bin/* "$HOST":/usr/local/bin/
 scp -q tools/*.py "$HOST":/opt/hems/
@@ -16,7 +18,7 @@ ssh "$HOST" '
   test -f /etc/hems/secrets.env || echo "WARNING: /etc/hems/secrets.env missing (TIBBER_TOKEN)"
   systemctl daemon-reload
   systemctl enable -q --now hems-hdmi-off
-  for s in hems-display hems-logger hems-planner hems-executor; do systemctl enable -q "$s"; systemctl restart "$s"; done
+  for s in hems-display hems-logger hems-planner hems-executor hems-web; do systemctl enable -q "$s"; systemctl restart "$s"; done
   sleep 3
-  systemctl is-active hems-display hems-logger hems-planner hems-executor
+  systemctl is-active hems-display hems-logger hems-planner hems-executor hems-web
 '

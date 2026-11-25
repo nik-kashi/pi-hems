@@ -82,6 +82,9 @@ The planner solves this over the whole known price horizon (up to ~44 h after
    ```
 6. Set the device IPs in `hems/config.py` as a starting point (they are rediscovered
    automatically if they change), then `./deploy.sh root@<pi>`.
+7. Change the default root password (`passwd`), then allow SSH keys only: copy
+   `ssh/00-hems-keyonly.conf` to `/etc/ssh/sshd_config.d/` and `systemctl reload ssh`.
+   Check that key login works first; `deploy.sh` does not do this step.
 
 ## Status
 

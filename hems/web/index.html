@@ -160,7 +160,8 @@ function renderFlow(s) {
   g += arrow(132, 90, 188, 90, C.solar, on('solar_grid'));
   g += arrow(132, 140, 188, 176, C.solar, on('solar_home'));
   g += arrow(70, 139, 70, 175, C.solar, on('solar_battery'));
-  g += arrow(188, 140, 133, 175, C.grid, on('grid_battery'));
+  g += on('battery_grid') ? arrow(133, 175, 188, 140, C.battery, true)   // same line, either direction
+                          : arrow(188, 140, 133, 175, C.grid, on('grid_battery'));
   g += arrow(250, 139, 250, 175, C.grid, on('grid_home'));
   g += arrow(131, 226, 187, 226, C.battery, on('battery_home'));
   if (sf) {
@@ -179,8 +180,9 @@ function renderFlow(s) {
   if (on('solar_battery')) g += pill(70, 157, `${f.solar_battery} W`, C.solar);
   if (on('grid_home')) g += pill(250, 157, `${f.grid_home} W`, C.grid);
   if (on('battery_home')) g += pill(160, 226, `${f.battery_home} W`, C.battery);
-  const both = on('grid_battery') && on('solar_home');
-  if (on('grid_battery')) g += pill(160, both ? 150 : 158, `${f.grid_battery} W`, C.grid);
+  const both = (on('grid_battery') || on('battery_grid')) && on('solar_home');
+  if (on('battery_grid')) g += pill(160, both ? 150 : 158, `${f.battery_grid} W`, C.battery);
+  else if (on('grid_battery')) g += pill(160, both ? 150 : 158, `${f.grid_battery} W`, C.grid);
   if (on('solar_home')) g += pill(160, both ? 167 : 158, `${f.solar_home} W`, C.solar);
   document.getElementById('flow').innerHTML =
     `<svg viewBox="4 36 312 244" role="img" aria-label="Energy flow between solar, grid, battery and home"

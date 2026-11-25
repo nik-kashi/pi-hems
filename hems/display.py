@@ -127,13 +127,14 @@ def _fresh(x):
 def flows(p1, sf):
     """Energy flows in W between the four tiles (all >= 0)."""
     f = dict.fromkeys(["solar_grid", "solar_battery", "solar_home",
-                       "grid_battery", "grid_home", "battery_home"], 0)
+                       "grid_battery", "grid_home", "battery_home", "battery_grid"], 0)
     if not sf:
         return f, None
     solar, ac_in, ac_out = sf["solar_w"], sf["grid_to_bat_w"], sf["to_home_w"]
     solar_out = min(solar, ac_out)                 # solar sent out on the AC side
     f["solar_battery"] = max(0, solar - solar_out)
-    f["battery_home"] = max(0, ac_out - solar_out)
+    bat_out = max(0, ac_out - solar_out)           # battery sent out on the AC side
+    f["battery_home"] = bat_out
     f["grid_battery"] = ac_in
     home = None
     if p1:
@@ -145,6 +146,8 @@ def flows(p1, sf):
         else:                                      # exporting
             f["solar_grid"] = min(solar_out, -g)
             f["solar_home"] = max(0, solar_out - f["solar_grid"])
+            f["battery_grid"] = min(bat_out, -g - f["solar_grid"])   # rest of the export
+            f["battery_home"] = bat_out - f["battery_grid"]
     return f, home
 
 
@@ -356,7 +359,10 @@ def energy_section(d, v):
     arrow(d, 132, 90, 188, 90, YELLOW, on["solar_grid"])
     arrow(d, 132, 140, 188, 176, YELLOW, on["solar_home"])
     arrow(d, 70, 139, 70, 175, YELLOW, on["solar_battery"])
-    arrow(d, 188, 140, 133, 175, BLUE, on["grid_battery"])
+    if on["battery_grid"]:                         # same line, either direction
+        arrow(d, 133, 175, 188, 140, GREEN, True)
+    else:
+        arrow(d, 188, 140, 133, 175, BLUE, on["grid_battery"])
     arrow(d, 250, 139, 250, 175, BLUE, on["grid_home"])
     arrow(d, 131, 226, 187, 226, GREEN, on["battery_home"])
 
@@ -392,8 +398,10 @@ def energy_section(d, v):
         pill(d, 250, 157, f"{f['grid_home']} W", BLUE)
     if on["battery_home"]:
         pill(d, 160, 226, f"{f['battery_home']} W", GREEN)
-    both = on["grid_battery"] and on["solar_home"]
-    if on["grid_battery"]:
+    both = (on["grid_battery"] or on["battery_grid"]) and on["solar_home"]
+    if on["battery_grid"]:
+        pill(d, 160, 150 if both else 158, f"{f['battery_grid']} W", GREEN)
+    elif on["grid_battery"]:
         pill(d, 160, 150 if both else 158, f"{f['grid_battery']} W", BLUE)
     if on["solar_home"]:
         pill(d, 160, 167 if both else 158, f"{f['solar_home']} W", YELLOW)

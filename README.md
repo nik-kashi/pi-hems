@@ -61,7 +61,7 @@ The planner solves this over the whole known price horizon (up to ~44 h after
 | `tibber.py` | Fetch Tibber 15-min prices, cache in `/var/lib/hems/prices.json`, background refresh |
 | `display.py` | Status screen: 2x2 Solar/Grid/Battery/Home tiles with energy-flow arrows, weather, price chart (today + tomorrow, coloured by plan), plan, CPU/RAM/disk; dims between sunset and sunrise |
 | `weather.py` | Current temperature + weather code from Open-Meteo (no key), every 15 min |
-| `logger.py` | Samples every 5 s, writes 15-min energy totals split by operating mode to `/var/lib/hems/energy-YYYY-MM.csv` |
+| `logger.py` | Samples every 5 s; 15-min energy totals by operating mode plus energy, peak and time above 25 A per phase in `/var/lib/hems/energy-YYYY-MM.csv`. A restart continues the running interval |
 | `config.py` | All tunables: device IPs, battery capacity/limits, efficiencies, wear cost, shadow mode |
 | `planner.py` | Linear-program battery plan over all known 15-min prices: CHARGE / BYPASS / DISCHARGE per slot; `hems-plan` prints it |
 | `guard.py` | Fuse guard: limits grid charging to the spare capacity on the battery's phase (L3, 24 A of 25 A); no P1 data = no grid charging |

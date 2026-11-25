@@ -8,7 +8,7 @@ P1_METER = "http://192.168.2.10"     # starting point; devices.py rediscovers on
 LAT, LON = 52.1, 5.1
 
 # --- battery -----------------------------------------------------------------
-CAPACITY_KWH = 6.72          # AB3000L 2.88 + 2x AB2000 1.92 (assumed; ~7.0 measured)
+CAPACITY_KWH = 8.16          # built-in 2.40 + 2x AB3000L 2.88 (measured 8.0-8.3)
 MIN_SOC = 10                 # % (matches device minSoc)
 MAX_SOC = 97                 # % (matches device socSet)
 CHARGE_MAX_W = 2000          # AC grid charging limit

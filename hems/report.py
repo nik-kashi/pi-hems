@@ -17,7 +17,9 @@ for path in sorted(glob.glob("/var/lib/hems/energy-*.csv")):
         rows += 1
         for k, v in r.items():
             if k.endswith("_wh") or k.endswith("_s"):
-                tot[k] = tot.get(k, 0) + float(v)
+                tot[k] = tot.get(k, 0) + float(v or 0)
+            elif k.endswith("_max_w"):
+                tot[k] = max(tot.get(k, 0), float(v or 0))
 
 if not rows:
     sys.exit("no data yet")
@@ -47,3 +49,8 @@ if g("gc_ac_in_wh") >= 50 and g("dc_dc_out_wh") >= 50:
 if g("idle_s") > 1800:
     standby = (g("idle_dc_out_wh") - g("idle_dc_in_wh")) / (g("idle_s") / 3600)
     print(f"{'standby drain while idle':<30} {standby:5.1f} W   ({g('idle_s')/3600:.1f} h idle)")
+if any(g(f"l{n}_max_w") for n in (1, 2, 3)):
+    print("\nphases        " + "".join(f"{'L' + str(n):>10}" for n in (1, 2, 3)))
+    print("net energy    " + "".join(f"{g(f'l{n}_wh') / 1000:10.2f}" for n in (1, 2, 3)) + " kWh")
+    print("highest       " + "".join(f"{g(f'l{n}_max_w') / 230:10.1f}" for n in (1, 2, 3)) + " A (at 230 V)")
+    print("above 25 A    " + "".join(f"{g(f'l{n}_over_s'):10.0f}" for n in (1, 2, 3)) + " s")

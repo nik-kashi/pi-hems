@@ -326,8 +326,9 @@ def stacked_tile(d, key, label, icon, col, total, tag, parts, part_col, part_txt
         cx = bx0
         for k, v in enumerate(parts):
             w = (bx1 - bx0) * abs(v) / tot
-            if w >= 0.5:
-                d.rectangle((round(cx), by, round(cx + w) - 1, by + 5), fill=YELLOW if v < 0 else part_col[k])
+            if w >= 0.5:                       # rounding can make a thin part end before it starts
+                x0 = round(cx)
+                d.rectangle((x0, by, max(x0, round(cx + w) - 1), by + 5), fill=YELLOW if v < 0 else part_col[k])
             cx += w
     # values, spread evenly: first left-aligned, last right-aligned
     f = font(9)

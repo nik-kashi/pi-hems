@@ -184,7 +184,7 @@ def run_once():
 
 
 def main():
-    tibber.start()
+    tibber.start(archive=True)        # the planner keeps the price history
     time.sleep(5)                     # let the price cache load
     last_slot, last_nslots, last_limits = None, 0, None
     while True:

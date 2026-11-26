@@ -97,6 +97,27 @@ The planner solves this over the whole known price horizon (up to ~44 h after
 - [x] Live since 2026-11-24 13:34 (Zendure app: custom mode, all schedules deleted)
 - [ ] Load forecast instead of fixed house load
 
+## Backup and restore
+
+A USB stick labelled `HEMS-BACKUP` (ext4) in the Pi gets a nightly backup at
+03:30 (`bin/hems-backup`, `hems-backup.timer`): the Tibber token, the energy
+log and price archive in `/var/lib/hems`, the deployed code, the HEMS systemd
+units, SSH settings and the DietPi/boot config. One `hems-YYYY-MM-DD.tar.gz`
+per day (about 300 KB); after 60 days only the first archive of each month is
+kept. The stick is mounted only while the backup runs. Result:
+`journalctl -u hems-backup`; run one now: `systemctl start hems-backup`.
+
+Restore on a fresh DietPi card:
+
+```
+mount /dev/disk/by-label/HEMS-BACKUP /mnt
+tar -xzf /mnt/hems/hems-YYYY-MM-DD.tar.gz -C /
+umount /mnt
+apt install python3 python3-pil python3-numpy python3-scipy fonts-dejavu-core avahi-daemon
+systemctl daemon-reload
+systemctl enable --now hems-hdmi-off hems-backup.timer hems-display hems-logger hems-planner hems-executor hems-web
+```
+
 ## Findings
 
 - **Zendure app modes overwrite local commands.** In the app's self-consumption

@@ -1,0 +1,7 @@
+[Unit]
+Description=HEMS backup to the USB stick (HEMS-BACKUP)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/hems-backup
+IOSchedulingClass=idle

@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Nightly HEMS backup to the USB stick labelled HEMS-BACKUP (ext4).
+#
+# The stick is mounted only while the backup runs, so a power cut or a pulled
+# stick at any other time cannot corrupt it. One archive per day
+# (hems-YYYY-MM-DD.tar.gz); archives older than KEEP_DAYS are deleted except
+# the first one of each month, which is kept for good.
+#
+# Restore: mount the stick, then  tar -xzf hems-YYYY-MM-DD.tar.gz -C /
+# (on a fresh DietPi; see README "Backup and restore").
+set -euo pipefail
+LABEL=HEMS-BACKUP
+DEV=/dev/disk/by-label/$LABEL
+MNT=/mnt/hems-backup
+KEEP_DAYS=60
+PATHS=(
+  /etc/hems                      # Tibber token
+  /var/lib/hems                  # energy log, decisions, price archive
+  /opt/hems                      # deployed code (also on GitHub)
+  /etc/systemd/system/hems-*.service /etc/systemd/system/hems-*.timer /usr/local/bin/hems-*
+  /etc/ssh/sshd_config.d /root/.ssh
+  /boot/firmware/config.txt /boot/dietpi.txt /etc/hostname /etc/network/interfaces
+)
+
+if [ ! -e "$DEV" ]; then
+  echo "backup stick '$LABEL' not found - nothing backed up" >&2
+  exit 1
+fi
+list=()
+for p in "${PATHS[@]}"; do [ -e "$p" ] && list+=("${p#/}"); done
+
+mkdir -p "$MNT"
+mount -o noatime "$DEV" "$MNT"
+trap 'cd /; sync; umount "$MNT"' EXIT
+mkdir -p "$MNT/hems"
+cd "$MNT/hems"
+
+out="hems-$(date +%F).tar.gz"
+nice -n 10 tar -czf "$out.tmp" -C / --exclude='__pycache__' --exclude='*.tmp' "${list[@]}"
+tar -tzf "$out.tmp" > /dev/null          # readable before it replaces anything
+mv -f "$out.tmp" "$out"
+sync
+
+cutoff=$(date -d "-$KEEP_DAYS days" +%F)
+for f in hems-????-??-??.tar.gz; do
+  d=${f:5:10}
+  [[ "$d" < "$cutoff" ]] || continue
+  first=$(ls hems-"${d:0:7}"-??.tar.gz | head -1)
+  [ "$f" = "$first" ] || rm -f "$f"
+done
+
+echo "backup $out: $(du -h "$out" | cut -f1), $(tar -tzf "$out" | grep -vc '/$') files;" \
+     "$(ls hems-*.tar.gz | wc -l) archives on the stick, $(df -h --output=avail . | tail -1 | tr -d ' ') free"

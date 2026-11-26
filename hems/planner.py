@@ -18,6 +18,9 @@ A charge/discharge pair is only chosen when
 which is exactly the break-even rule, applied across the whole horizon.
 
 Re-planned every slot with the measured SOC, so forecast errors self-correct.
+MIN_SOC/MAX_SOC are read from the device (minSoc/socSet as set in the Zendure
+app), so lowering the charge limit there (e.g. 60 % while away) is followed
+within 30 s; config values are the fallback. The wear cost stays fixed.
 
 Usage:
   planner.py            run as service (writes /run/hems/plan.json for the executor)
@@ -46,7 +49,18 @@ def slot_start(t):
     return t.replace(minute=t.minute - t.minute % C.SLOT_MIN, second=0, microsecond=0)
 
 
-def make_plan(now, soc_pct, slots):
+def soc_limits(sf):
+    """(min %, max %) from the device, or the config values if missing/implausible."""
+    try:
+        lo, hi = float(sf["min_soc"]), float(sf["max_soc"])
+        if 0 <= lo < hi <= 100:
+            return lo, hi
+    except (KeyError, TypeError, ValueError):
+        pass
+    return C.MIN_SOC, C.MAX_SOC
+
+
+def make_plan(now, soc_pct, slots, min_soc=C.MIN_SOC, max_soc=C.MAX_SOC):
     """Return plan dict for the slots from the current one to the last known price."""
     cur = slot_start(now)
     slots = [s for s in slots if s[0] >= cur]
@@ -57,8 +71,8 @@ def make_plan(now, soc_pct, slots):
 
     cap = C.CAPACITY_KWH
     e_now = soc_pct / 100 * cap
-    e_min = min(C.MIN_SOC / 100 * cap, e_now)   # never infeasible if already below
-    e_max = max(C.MAX_SOC / 100 * cap, e_now)
+    e_min = min(min_soc / 100 * cap, e_now)     # never infeasible if already below
+    e_max = max(max_soc / 100 * cap, e_now)     # above the limit: only discharge
     eta_c, eta_d, wear = C.ETA_CHARGE, C.ETA_DISCHARGE, C.WEAR_EUR_PER_KWH
 
     # remaining fraction of the current slot
@@ -103,6 +117,8 @@ def make_plan(now, soc_pct, slots):
     return {
         "created": now.isoformat(timespec="seconds"),
         "soc_now": soc_pct,
+        "min_soc": min_soc,
+        "max_soc": max_soc,
         "shadow": C.EXECUTOR_DRY_RUN,
         "v_end": round(v_end, 4),
         "charged_kwh": round(float(c.sum()), 2),
@@ -147,7 +163,7 @@ def log_decision(plan, sf):
 
 
 def print_plan(plan):
-    print(f"plan @ {plan['created']}  SOC {plan['soc_now']}%  "
+    print(f"plan @ {plan['created']}  SOC {plan['soc_now']}% (limits {plan['min_soc']:g}-{plan['max_soc']:g}%)  "
           f"charge {plan['charged_kwh']} kWh, discharge {plan['discharged_kwh']} kWh, "
           f"grid saving €{plan['grid_saving_eur']} - wear €{plan['wear_eur']}  "
           f"(end value €{plan['v_end']}/kWh)")
@@ -164,21 +180,29 @@ def run_once():
     if not tibber.slots():
         tibber._store(tibber._fetch())
     sf = devices.read_solarflow()
-    return make_plan(datetime.now().astimezone(), sf["soc"], tibber.slots())
+    return make_plan(datetime.now().astimezone(), sf["soc"], tibber.slots(), *soc_limits(sf))
 
 
 def main():
     tibber.start()
     time.sleep(5)                     # let the price cache load
-    last_slot, last_nslots = None, 0
+    last_slot, last_nslots, last_limits = None, 0, None
     while True:
         now = datetime.now().astimezone()
         cur = slot_start(now)
         nslots = len(tibber.slots())
-        if cur != last_slot or nslots != last_nslots:
+        try:
+            sf = devices.read_solarflow()
+        except Exception as e:
+            print(f"device read failed: {e}", flush=True)
+            sf = None
+        limits = soc_limits(sf) if sf else last_limits
+        if sf and (cur != last_slot or nslots != last_nslots or limits != last_limits):
             try:
-                sf = devices.read_solarflow()
-                plan = make_plan(now, sf["soc"], tibber.slots())
+                if last_limits and limits != last_limits:
+                    print(f"{now:%H:%M} SOC limits {last_limits[0]:g}-{last_limits[1]:g}% -> "
+                          f"{limits[0]:g}-{limits[1]:g}%", flush=True)
+                plan = make_plan(now, sf["soc"], tibber.slots(), *limits)
                 if plan:
                     write_plan(plan)
                     if cur != last_slot:
@@ -186,7 +210,7 @@ def main():
                     s0 = plan["slots"][0]
                     print(f"{now:%H:%M} SOC {sf['soc']}% price {s0['price']:.3f} -> {s0['mode']} {s0['power_w']} W"
                           f" | horizon {len(plan['slots'])} slots, saving €{plan['grid_saving_eur']}", flush=True)
-                    last_slot, last_nslots = cur, nslots
+                    last_slot, last_nslots, last_limits = cur, nslots, limits
             except Exception as e:
                 print(f"plan failed: {e}", flush=True)
         time.sleep(30)

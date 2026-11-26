@@ -235,7 +235,8 @@ function renderPlan(plan) {
   m.style.color = MODE[s0.mode];
   document.getElementById('net').textContent = `€${(plan.grid_saving_eur - plan.wear_eur).toFixed(2)} net`;
   document.getElementById('plansum').textContent =
-    `Charge ${plan.charged_kwh} kWh, discharge ${plan.discharged_kwh} kWh · battery now ${plan.soc_now}% · planned ${hm(plan.created)}` +
+    `Charge ${plan.charged_kwh} kWh, discharge ${plan.discharged_kwh} kWh · battery now ${plan.soc_now}%` +
+    (plan.max_soc != null ? ` (limits ${plan.min_soc}–${plan.max_soc}%)` : '') + ` · planned ${hm(plan.created)}` +
     (plan.shadow ? ' · shadow mode' : '');
   const segs = [];
   plan.slots.forEach(s => {

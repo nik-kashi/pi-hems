@@ -105,6 +105,11 @@ The planner solves this over the whole known price horizon (up to ~44 h after
   (app self-consumption + local charge/hold) is not possible; the app must be
   in a mode that does not control the battery. **Custom mode with all
   schedules deleted works**: local commands hold. (Test 2026-11-24, `tools/zcheck.py`.)
+- **SOC limits come from the device.** The planner reads `minSoc`/`socSet`
+  (as set in the Zendure app) every 30 s and re-plans when they change, so
+  e.g. a 60 % charge limit while away is respected; `config.py` values are
+  the fallback. HEMS never writes these limits. The wear cost uses the fixed
+  config range.
 - The TFT backlight is wired permanently on (GPIO22 has no effect), so
   night mode can only dim the image, not switch the backlight off. HDMI
   output is switched off at boot (`hems-hdmi-off`).

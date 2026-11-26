@@ -9,8 +9,8 @@ LAT, LON = 52.1, 5.1
 
 # --- battery -----------------------------------------------------------------
 CAPACITY_KWH = 8.16          # built-in 2.40 + 2x AB3000L 2.88 (measured 8.0-8.3)
-MIN_SOC = 10                 # % (matches device minSoc)
-MAX_SOC = 97                 # % (matches device socSet)
+MIN_SOC = 10                 # % fallback; the planner uses the device minSoc
+MAX_SOC = 97                 # % fallback; the planner uses the device socSet (wear uses these)
 CHARGE_MAX_W = 2000          # AC grid charging limit
 DISCHARGE_MAX_W = 1600       # AC output limit
 ETA_CHARGE = 0.93            # AC -> cells   (to be replaced by measured value)

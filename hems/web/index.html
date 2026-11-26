@@ -68,12 +68,14 @@
   .seg button:focus-visible, .close:focus-visible, .link:focus-visible, #hist:focus-visible { outline: 2px solid var(--price); outline-offset: 2px; }
   .close { background: var(--tile); border: 0; color: var(--fg); width: 32px; height: 32px; border-radius: 50%; font-size: 17px; cursor: pointer; }
   .scope { font-size: 13px; margin: -4px 0 8px; min-height: 19px; }
-  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(136px, 1fr)); gap: 10px; margin-bottom: 14px; }
   .stat { background: var(--tile); border-radius: 10px; padding: 10px 12px; }
   .stat .k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
   .stat .v { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
   .stat .s { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
   .stat.c .v { color: #50d278; } .stat.d .v { color: #ff963c; } .stat.p .v { color: var(--price); }
+  .stat.y .v { color: var(--solar); } .stat.g .v { color: var(--grid); }
+  .formula { font-size: 12px; color: var(--muted); margin: -4px 0 14px; }
   #hist { min-height: 120px; touch-action: pan-y; }
   #hist svg { width: 100%; height: auto; }
   .legend i.ln { height: 3px; width: 14px; vertical-align: 3px; border-radius: 2px; }
@@ -142,13 +144,16 @@
     </div>
     <div class="scope" id="hist-scope" aria-live="polite"></div>
     <div class="stats" id="hist-stats"></div>
+    <p class="formula" id="hist-formula"></p>
     <div id="hist" tabindex="0"></div>
     <div class="legend">
       <span><i class="ln" style="background: #50d278"></i>avg price when charging</span>
-      <span><i class="ln" style="background: #ff963c"></i>avg price when discharging</span>
+      <span><i class="ln" style="background: #ff963c"></i>avg price of energy used in house</span>
       <span><i class="ln" style="background: var(--price)"></i>Tibber average</span>
-      <span><i style="background: var(--charge)"></i>charged from grid</span>
-      <span><i style="background: var(--discharge)"></i>discharged</span>
+      <span><i style="background: var(--charge)"></i>from grid ↑</span>
+      <span><i style="background: var(--solar)"></i>solar ↑</span>
+      <span><i style="background: var(--discharge)"></i>used in house ↓</span>
+      <span><i style="background: var(--grid)"></i>exported ↓</span>
     </div>
   </section>
 </div>
@@ -359,31 +364,37 @@ async function tick() {
   }
 }
 // ---------- price history (opened from the price chart) ----------
+// Per day from /api/history (kWh and EUR); months and profit are computed here.
+//   profit = saved (battery+solar used in the house, at the all-in price)
+//          + earned (exported, at the export price) - grid charging cost - battery wear
 const hist = { data: null, n: 30, sel: null, geom: null, drag: false };
 try { const v = localStorage.getItem('hems-hist-range'); if (v) hist.n = v === 'year' ? 'year' : +v; } catch (e) {}
+const HSUM = ['chg', 'solar', 'used', 'exp', 'bat', 'chgCost', 'saved', 'earned'];
 const hEl = id => document.getElementById(id);
 const hCt = v => v == null ? '–' : (v * 100).toFixed(1) + ' ¢';
-const hEur = v => (v < 0 ? '−€' : '€') + Math.abs(v).toFixed(2);
+const hEur = v => (v < -0.005 ? '−€' : '€') + Math.abs(v).toFixed(2);
+const hKwh = v => (v >= 100 ? v.toFixed(0) : v.toFixed(1)) + ' kWh';
 const hDay = d => d.isMonth ? d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })
                             : d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 const hNice = v => { const p = 10 ** Math.floor(Math.log10(v)); return [1, 2, 2.5, 5, 10].map(m => m * p).find(x => x >= v); };
 
-// sum days into one row (a month, or the whole range)
-function histSum(rows) {
-  const live = rows.filter(d => d.live);
-  const pc = live.filter(d => d.chgP != null), pd = live.filter(d => d.disP != null);
-  const cK = pc.reduce((a, d) => a + d.chg, 0), dK = pd.reduce((a, d) => a + d.dis, 0);
-  const pa = rows.filter(d => d.avg != null);
-  return {
-    chg: live.reduce((a, d) => a + d.chg, 0), dis: live.reduce((a, d) => a + d.dis, 0),
-    chgP: cK ? pc.reduce((a, d) => a + d.chg * d.chgP, 0) / cK : null,
-    disP: dK ? pd.reduce((a, d) => a + d.dis * d.disP, 0) / dK : null,
-    avg: pa.length ? pa.reduce((a, d) => a + d.avg, 0) / pa.length : null,
-    live: live.length > 0, ndays: rows.length, nlive: live.length,
-  };
+// average prices and profit from the sums (lines need at least 0.1 kWh)
+function histDerive(r) {
+  r.chgP = r.chg >= 0.1 ? r.chgCost / r.chg : null;
+  r.usedP = r.used >= 0.1 ? r.saved / r.used : null;
+  r.wearEur = r.bat * hist.data.wear;
+  r.profit = r.saved + r.earned - r.chgCost - r.wearEur;
+  return r;
 }
-function histNet(r) {
-  return (r.disP != null ? r.dis * r.disP : 0) - (r.chgP != null ? r.chg * r.chgP : 0) - r.dis * hist.data.wear;
+function histSum(rows) {
+  const r = {};
+  HSUM.forEach(k => r[k] = rows.reduce((a, d) => a + (d[k] || 0), 0));
+  const pa = rows.filter(d => d.avg != null);
+  r.avg = pa.length ? pa.reduce((a, d) => a + d.avg, 0) / pa.length : null;
+  r.ndays = rows.reduce((a, d) => a + (d.ndays || 1), 0);
+  r.nlive = rows.reduce((a, d) => a + (d.nlive != null ? d.nlive : d.live ? 1 : 0), 0);
+  r.live = r.nlive > 0;
+  return histDerive(r);
 }
 function histRows() {
   const all = hist.data.days;
@@ -403,22 +414,22 @@ function histDraw() {
   const host = hEl('hist');
   if (!hist.data || !hist.data.days.length) {
     host.innerHTML = '<p class="muted">No price history yet. It appears once the planner has saved prices.</p>';
-    hEl('hist-stats').innerHTML = ''; hEl('hist-scope').textContent = '';
+    hEl('hist-stats').innerHTML = ''; hEl('hist-scope').textContent = ''; hEl('hist-formula').textContent = '';
     return;
   }
   const days = histRows(), per = hist.n === 'year' ? 'month' : 'day';
   if (hist.sel != null && hist.sel >= days.length) hist.sel = null;
   const W = Math.max(280, host.clientWidth), narrow = W < 520;
-  const padL = 8, padR = 44, top = 22, priceH = narrow ? 150 : 180, gap = 30, barsH = narrow ? 110 : 130, axisH = 22;
+  const padL = 8, padR = 44, top = 22, priceH = narrow ? 150 : 180, gap = 30, barsH = narrow ? 120 : 140, axisH = 22;
   const H = top + priceH + gap + barsH + axisH;
   const cw = (W - padL - padR) / days.length, cx = i => padL + cw * (i + 0.5);
 
-  const pv = days.flatMap(d => [d.avg, d.chgP, d.disP]).filter(v => v != null);
+  const pv = days.flatMap(d => [d.avg, d.chgP, d.usedP]).filter(v => v != null);
   const step = pv.length && Math.max(...pv) - Math.min(...pv) > 0.5 ? 0.1 : 0.05;
   const lo = pv.length ? Math.floor(Math.min(...pv) / step) * step : 0;
   const hi = pv.length ? Math.max(lo + step, Math.ceil(Math.max(...pv) / step) * step) : step;
   const py = v => top + priceH - (v - lo) / (hi - lo) * priceH;
-  const km = hNice(Math.max(2, ...days.map(d => Math.max(d.chg, d.dis))));
+  const km = hNice(Math.max(2, ...days.map(d => Math.max(d.chg + d.solar, d.used + d.exp))));
   const zero = top + priceH + gap + barsH / 2, ky = v => zero - v / km * (barsH / 2);
 
   let g = '';
@@ -431,7 +442,7 @@ function histDraw() {
     g += `<text x="${W - padR + 6}" y="${ky(v) + 4}" font-size="11" fill="var(--muted)">${+Math.abs(v).toFixed(1)}</text>`;
   });
   g += `<text x="${padL}" y="${top - 8}" font-size="10" fill="var(--muted)">price per ${per}, ¢/kWh</text>`;
-  g += `<text x="${padL}" y="${top + priceH + gap - 4}" font-size="10" fill="var(--muted)">kWh per ${per} · <tspan fill="${MODE.CHARGE}">charged ↑</tspan> · <tspan fill="${MODE.DISCHARGE}">discharged ↓</tspan></text>`;
+  g += `<text x="${padL}" y="${top + priceH + gap - 4}" font-size="10" fill="var(--muted)">kWh per ${per} · in ↑ · out ↓</text>`;
 
   const first = days.findIndex(d => d.live);
   if (first > 0) {
@@ -441,10 +452,20 @@ function histDraw() {
   }
   if (hist.sel != null) g += `<rect x="${padL + cw * hist.sel}" y="${top}" width="${cw}" height="${priceH + gap + barsH}" fill="#ffffff" opacity=".06"/>`;
 
+  // stacked bars: in = grid charge + solar (up), out = used in house + exported (down)
   const bw = Math.max(1.5, Math.min(cw * 0.62, 28));
+  const stack = (i, parts, dir) => {
+    let at = 0;
+    parts.forEach(([v, col]) => {
+      if (!(v > 0)) return;
+      const y1 = ky(dir * at), y2 = ky(dir * (at + v));
+      g += `<rect x="${cx(i) - bw / 2}" y="${Math.min(y1, y2)}" width="${bw}" height="${Math.abs(y2 - y1)}" fill="${col}"/>`;
+      at += v;
+    });
+  };
   days.forEach((d, i) => {
-    if (d.chg > 0) g += `<rect x="${cx(i) - bw / 2}" y="${ky(d.chg)}" width="${bw}" height="${zero - ky(d.chg)}" rx="1.5" fill="${C.CHARGE}"/>`;
-    if (d.dis > 0) g += `<rect x="${cx(i) - bw / 2}" y="${zero}" width="${bw}" height="${ky(-d.dis) - zero}" rx="1.5" fill="${C.DISCHARGE}"/>`;
+    stack(i, [[d.chg, C.CHARGE], [d.solar, C.solar]], 1);
+    stack(i, [[d.used, C.DISCHARGE], [d.exp, C.grid]], -1);
   });
   const line = (key, col) => {
     let path = '', pen = false, dots = '';
@@ -457,10 +478,10 @@ function histDraw() {
     });
     return `<path d="${path}" fill="none" stroke="${col}" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>${dots}`;
   };
-  g += line('avg', 'var(--price)') + line('chgP', MODE.CHARGE) + line('disP', MODE.DISCHARGE);
+  g += line('avg', 'var(--price)') + line('chgP', MODE.CHARGE) + line('usedP', MODE.DISCHARGE);
   if (hist.sel != null) {
     const s = days[hist.sel];
-    [['avg', 'var(--price)'], ['chgP', MODE.CHARGE], ['disP', MODE.DISCHARGE]].forEach(([k, c]) => {
+    [['avg', 'var(--price)'], ['chgP', MODE.CHARGE], ['usedP', MODE.DISCHARGE]].forEach(([k, c]) => {
       if (s[k] != null) g += `<circle cx="${cx(hist.sel)}" cy="${py(s[k])}" r="4" fill="var(--card)" stroke="${c}" stroke-width="2"/>`;
     });
   }
@@ -471,25 +492,32 @@ function histDraw() {
   });
   hist.geom = { padL, cw, n: days.length };
   host.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" font-family="system-ui, sans-serif"
-    aria-label="Average price when charging and discharging, Tibber average, and kWh charged and discharged per ${per}">${g}</svg>`;
+    aria-label="Average prices and energy in and out per ${per}">${g}</svg>`;
 
   if (hist.sel == null) {
     const a = days[0].date, b = days[days.length - 1].date, f = d => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
     histStats(histSum(hist.n === 'year' ? hist.data.days.filter(d => d.date >= a) : days),
-              hist.n === 'year' ? `Last 12 months · ${hDay(a)} to ${hDay(b)}` : `Last ${days.length} days · ${f(a)} to ${f(b)}`, false);
+              hist.n === 'year' ? `Last 12 months · ${hDay(a)} to ${hDay(b)}` : `Last ${days.length} days · ${f(a)} to ${f(b)}`, false, false);
   } else {
-    histStats(Object.assign({ ndays: 1, nlive: days[hist.sel].live ? 1 : 0 }, days[hist.sel]), hDay(days[hist.sel].date), true);
+    const s = days[hist.sel];
+    histStats(s.date.isMonth ? s : histSum([s]), hDay(s.date), true, !!s.date.isMonth);
   }
 }
 
-function histStats(r, label, one) {
+function histStats(r, label, one, month) {
   hEl('hist-scope').innerHTML = `<b>${esc(label)}</b>` + (one ? ' <span class="muted">· move away or lift your finger for the whole chart</span>' : '');
-  const month = r.date && r.date.isMonth;
-  hEl('hist-stats').innerHTML = `
-    <div class="stat c"><div class="k">Charged</div><div class="v">${r.chg.toFixed(1)} kWh</div><div class="s">avg ${hCt(r.chgP)}</div></div>
-    <div class="stat d"><div class="k">Discharged</div><div class="v">${r.dis.toFixed(1)} kWh</div><div class="s">avg ${hCt(r.disP)}</div></div>
-    <div class="stat p"><div class="k">Tibber average</div><div class="v">${hCt(r.avg)}</div><div class="s">${one ? (month ? 'month average' : 'day average') : r.ndays + ' days'}</div></div>
-    <div class="stat"><div class="k">Net after wear</div><div class="v">${r.nlive ? hEur(histNet(r)) : '–'}</div><div class="s">${!r.nlive ? 'before HEMS' : one && !month ? 'this day' : r.nlive + ' days with HEMS'}</div></div>`;
+  const box = (cls, k, v, s) => `<div class="stat ${cls}"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${s}</div></div>`;
+  const none = !r.nlive;
+  hEl('hist-stats').innerHTML =
+    box('c', 'From grid', none ? '–' : hKwh(r.chg), none ? 'into the battery' : `avg ${hCt(r.chgP)} · cost ${hEur(r.chgCost)}`) +
+    box('y', 'Solar', none ? '–' : hKwh(r.solar), 'produced') +
+    box('d', 'Used in house', none ? '–' : hKwh(r.used), none ? 'from battery and solar' : `avg ${hCt(r.usedP)} · saved ${hEur(r.saved)}`) +
+    box('g', 'Exported', none ? '–' : hKwh(r.exp), none ? 'to the grid' : `earned ${hEur(r.earned)}`) +
+    box('p', 'Tibber average', hCt(r.avg), one ? (month ? 'month average' : 'day average') : r.ndays + ' days') +
+    box('', 'Profit', none ? '–' : hEur(r.profit), none ? 'before HEMS' : one && !month ? 'this day' : r.nlive + ' days with HEMS');
+  hEl('hist-formula').textContent = none ? '' :
+    `Profit = saved ${hEur(r.saved)} + earned ${hEur(r.earned)} − grid charging ${hEur(r.chgCost)} − battery wear ${hEur(r.wearEur)}` +
+    ` (${hKwh(r.bat)} discharged × ${(hist.data.wear * 100).toFixed(1)} ¢). Export valued at ${hist.data.export_price || 'the export price'}.`;
 }
 
 function histPick(clientX) {
@@ -512,6 +540,7 @@ async function histOpen() {
     const d = await (await fetch('/api/history', { cache: 'no-store' })).json();
     d.days.forEach(x => { const [y, m, dd] = x.date.split('-').map(Number); x.date = new Date(y, m - 1, dd); });
     hist.data = d;
+    d.days.forEach(histDerive);
   } catch (e) {
     if (!hist.data) { hEl('hist-scope').textContent = 'Could not load the history from the Pi. Close and try again.'; return; }
   }

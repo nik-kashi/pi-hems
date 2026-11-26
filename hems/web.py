@@ -32,6 +32,10 @@ try:
     from config import WEAR_EUR_PER_KWH
 except Exception:
     WEAR_EUR_PER_KWH = 0.0
+try:
+    from config import EXPORT_PRICE
+except Exception:
+    EXPORT_PRICE = "energy"
 
 
 def _load(path):
@@ -80,12 +84,16 @@ def _cached(path, parse):
 
 
 def _parse_prices(path):
-    """{slot epoch: price} plus {date: [sum, n]} for one month."""
+    """{slot epoch: (all-in price, export price)} plus {date: [sum, n]} for one month."""
     slots, days = {}, {}
     with open(path, newline="") as f:
         for r in csv.DictReader(f):
             t, p = datetime.fromisoformat(r["start"]), float(r["total"])
-            slots[int(t.timestamp())] = p
+            if EXPORT_PRICE == "energy":
+                e = float(r["energy"]) if r.get("energy") else p
+            else:
+                e = float(EXPORT_PRICE)
+            slots[int(t.timestamp())] = (p, e)
             d = days.setdefault(t.date().isoformat(), [0.0, 0])
             d[0] += p
             d[1] += 1
@@ -93,21 +101,25 @@ def _parse_prices(path):
 
 
 def _parse_energy(path):
-    """[(slot epoch, date, grid kWh into battery, battery kWh out)] for one month."""
+    """Per 15-min row (kWh): grid into battery, solar produced, battery+solar
+    used in the house, exported, and battery discharged (for wear)."""
     rows = []
+    f0 = lambda r, k: float(r.get(k) or 0) / 1000
     with open(path, newline="") as f:
         for r in csv.DictReader(f):
             t = datetime.fromisoformat(r["start"])
-            chg = float(r["ac_in_wh"] or 0) / 1000
-            dis = max(0.0, float(r["ac_out_wh"] or 0) - float(r["solar_wh"] or 0)) / 1000   # minus solar passing through
-            slot = int(t.timestamp()) // 900 * 900
-            rows.append((slot, t.date().isoformat(), chg, dis))
+            out, solar, exp = f0(r, "ac_out_wh"), f0(r, "solar_wh"), f0(r, "grid_export_wh")
+            exp = min(exp, out)                      # only the SolarFlow can export
+            rows.append((int(t.timestamp()) // 900 * 900, t.date().isoformat(),
+                         f0(r, "ac_in_wh"), solar, out - exp, exp, max(0.0, out - solar)))
     return rows
 
 
 def api_history():
-    """One row per day: Tibber day average, grid kWh charged and battery kWh
-    discharged, and the kWh-weighted price of each. Months are summed on the page."""
+    """One row per day: Tibber day average, kWh and EUR of grid charging (cost),
+    battery+solar used in the house (saved at the all-in price), export (earned
+    at the export price), solar produced and battery discharged (for wear).
+    Months and the profit are computed on the page."""
     today = datetime.now().astimezone().date()
     first = today - timedelta(days=HISTORY_DAYS - 1)
     months = sorted({(first + timedelta(days=i)).strftime("%Y-%m") for i in range(HISTORY_DAYS)})
@@ -117,30 +129,28 @@ def api_history():
         if got:
             price.update(got[0])
             avg.update(got[1])
+    keys = ("chg", "solar", "used", "exp", "bat", "chgCost", "saved", "earned")
     acc = {}
     for m in months:
-        for slot, day, chg, dis in _cached(f"{DATA_DIR}/energy-{m}.csv", _parse_energy) or []:
-            a = acc.setdefault(day, [0.0, 0.0, 0.0, 0.0, 0.0, 0.0])   # chg, dis, chg kWh priced, chg cost, dis kWh priced, dis value
-            a[0] += chg
-            a[1] += dis
-            p = price.get(slot)
-            if p is not None:
-                a[2] += chg; a[3] += chg * p
-                a[4] += dis; a[5] += dis * p
+        for slot, day, chg, solar, used, exp, bat in _cached(f"{DATA_DIR}/energy-{m}.csv", _parse_energy) or []:
+            a = acc.setdefault(day, dict.fromkeys(keys, 0.0))
+            a["chg"] += chg; a["solar"] += solar; a["used"] += used; a["exp"] += exp; a["bat"] += bat
+            p, e = price.get(slot, (None, None))
+            if p is not None:                       # a slot without a price adds kWh but no EUR
+                a["chgCost"] += chg * p
+                a["saved"] += used * p
+                a["earned"] += exp * e
     days = []
     for i in range(HISTORY_DAYS):
         d = (first + timedelta(days=i)).isoformat()
         a, s = acc.get(d), avg.get(d)
         if not a and not s:
             continue
-        row = {"date": d, "avg": round(s[0] / s[1], 4) if s else None, "live": bool(a),
-               "chg": 0, "dis": 0, "chgP": None, "disP": None}
-        if a:
-            row.update(chg=round(a[0], 3), dis=round(a[1], 3),
-                       chgP=round(a[3] / a[2], 4) if a[2] >= 0.1 else None,
-                       disP=round(a[5] / a[4], 4) if a[4] >= 0.1 else None)
+        row = {"date": d, "avg": round(s[0] / s[1], 4) if s else None, "live": bool(a)}
+        row.update({k: round(a[k] if a else 0.0, 4) for k in keys})
         days.append(row)
-    return {"days": days, "wear": WEAR_EUR_PER_KWH}
+    return {"days": days, "wear": WEAR_EUR_PER_KWH,
+            "export_price": "Tibber energy part" if EXPORT_PRICE == "energy" else f"{EXPORT_PRICE} EUR/kWh"}
 
 
 def _local_client(addr):

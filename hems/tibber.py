@@ -23,9 +23,9 @@ CACHE = "/var/lib/hems/prices.json"
 ARCHIVE_DIR = "/var/lib/hems"
 ARCHIVE_DAYS = 366
 RANGE_QUERY = """{ viewer { homes { currentSubscription {
-  priceInfoRange(resolution: QUARTER_HOURLY, first: %d, after: "%s") { nodes { startsAt total } } } } } }"""
+  priceInfoRange(resolution: QUARTER_HOURLY, first: %d, after: "%s") { nodes { startsAt total energy } } } } } }"""
 QUERY = """{ viewer { homes { currentSubscription { priceInfo(resolution: QUARTER_HOURLY) {
-  today { total startsAt level } tomorrow { total startsAt level } } } } } }"""
+  today { total energy startsAt level } tomorrow { total energy startsAt level } } } } } }"""
 
 _lock = threading.Lock()
 _slots = []          # list of (start: datetime aware, total: float, level: str)
@@ -94,22 +94,28 @@ def _archive_path(month):
 
 
 def read_archive(month):
-    """{startsAt ISO: total} for one 'YYYY-MM' month file."""
+    """{startsAt ISO: (total, energy or None)} for one 'YYYY-MM' month file.
+    total = all-in price, energy = its market part without energy tax/VAT."""
     try:
         with open(_archive_path(month), newline="") as f:
-            return {r["start"]: float(r["total"]) for r in csv.DictReader(f)}
+            return {r["start"]: (float(r["total"]), float(r["energy"]) if r.get("energy") else None)
+                    for r in csv.DictReader(f)}
     except (OSError, KeyError, ValueError):
         return {}
 
 
 def archive(raw):
-    """Merge Tibber price nodes ({startsAt, total}) into the monthly files."""
+    """Merge Tibber price nodes ({startsAt, total, energy}) into the monthly files."""
     by_month = {}
     for x in raw:
         t = datetime.fromisoformat(x["startsAt"]).isoformat()     # one spelling per slot
-        by_month.setdefault(t[:7], {})[t] = x["total"]
+        by_month.setdefault(t[:7], {})[t] = (x["total"], x.get("energy"))
     for month, new in by_month.items():
         cur = read_archive(month)
+        for k, (total, energy) in new.items():
+            if energy is None and k in cur:        # never lose a known energy part
+                energy = cur[k][1]
+            new[k] = (total, energy)
         if all(cur.get(k) == v for k, v in new.items()):
             continue
         cur.update(new)
@@ -117,10 +123,23 @@ def archive(raw):
         tmp = _archive_path(month) + ".tmp"
         with open(tmp, "w", newline="") as f:
             w = csv.writer(f)
-            w.writerow(["start", "total"])
+            w.writerow(["start", "total", "energy"])
             for k in sorted(cur):
-                w.writerow([k, cur[k]])
+                w.writerow([k, cur[k][0], "" if cur[k][1] is None else cur[k][1]])
         os.replace(tmp, _archive_path(month))
+
+
+def _archive_upgrade():
+    """Archives written before the energy column existed are fetched again."""
+    old = []
+    for path in glob.glob(f"{ARCHIVE_DIR}/prices-????-??.csv"):
+        with open(path) as f:
+            if "energy" not in f.readline():
+                old.append(path)
+    for path in old:
+        os.remove(path)
+    if old:
+        print(f"tibber: refetching {len(old)} archive months (adding the energy price)", flush=True)
 
 
 def _archive_latest():
@@ -158,8 +177,10 @@ def _worker(keep_archive):
     _load_cache()
     if keep_archive:
         try:
+            _archive_upgrade()
             backfill()
-            archive([{"startsAt": t.isoformat(), "total": p} for t, p, _ in slots()])   # today + tomorrow from the cache
+            with open(CACHE) as f:
+                archive(json.load(f))                 # today + tomorrow from the cache
         except Exception as e:
             print(f"tibber: backfill failed: {e}", flush=True)
     while True:

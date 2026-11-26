@@ -23,6 +23,11 @@ AVG_HEALTH = 0.85            # average remaining capacity over its life
 WEAR_EUR_PER_KWH = round(BATTERY_PRICE_EUR / (CAPACITY_KWH * (MAX_SOC - MIN_SOC) / 100
                                               * BATTERY_CYCLES * AVG_HEALTH * ETA_DISCHARGE), 3)
 
+# Value of exported energy (battery or solar) in the web page's profit.
+# "energy" = Tibber's market part of the price per slot (all-in price minus
+# energy tax and VAT); or a fixed number in EUR/kWh.
+EXPORT_PRICE = "energy"
+
 # --- house -------------------------------------------------------------------
 # Expected house load per slot. Heat pump keeps load above the discharge limit
 # in peak hours, so v1 assumes the battery can always deliver DISCHARGE_MAX_W.

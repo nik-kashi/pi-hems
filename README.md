@@ -66,7 +66,7 @@ The planner solves this over the whole known price horizon (up to ~44 h after
 | `planner.py` | Linear-program battery plan over all known 15-min prices: CHARGE / BYPASS / DISCHARGE per slot; `hems-plan` prints it |
 | `guard.py` | Fuse guard: limits grid charging to the spare capacity on the battery's phase (L3, 24 A of 25 A); no P1 data = no grid charging |
 | `executor.py` | Turns the current plan slot into SolarFlow commands (`acMode`, `inputLimit`, `outputLimit`, always `smartMode=1`); zero-export load follower while discharging; dry-run by default |
-| `web.py` + `web/index.html` | Read-only web page on port 80 (`http://hems.home/` via the router DNS, or `http://hems.local/`): energy flow, prices + plan, executor, system; JSON at `/api/state`. Clicking the price chart opens the price history (14 d / 30 d / 90 d / 1 year by month): Tibber average, average price when charging and discharging, kWh charged and discharged, net after wear; JSON at `/api/history` |
+| `web.py` + `web/index.html` | Read-only web page on port 80 (`http://hems.home/` via the router DNS, or `http://hems.local/`): energy flow, prices + plan, executor, system; JSON at `/api/state`. Clicking the price chart opens the price history (14 d / 30 d / 90 d / 1 year by month): kWh in (grid charging, solar) and out (used in house, exported), average prices, and profit = saved (battery/solar used in the house × full price) + earned (export × export price, `EXPORT_PRICE` in config) − grid charging − battery wear; JSON at `/api/history` |
 | `report.py` | `hems-report [YYYY-MM-DD]`: measured charge/discharge efficiency, round trip, standby drain |
 
 ## Setup
@@ -115,7 +115,8 @@ The planner solves this over the whole known price horizon (up to ~44 h after
   returns quarter-hour prices at least a year back (max 672 per request, cursor
   = base64 of an ISO time); the planner fills any gap on start (first run: one
   year, about a minute). Tibber's DAILY total equals the mean of the 96
-  quarter-hours.
+  quarter-hours. Each price is also split into `energy` (market part) and `tax`;
+  the archive keeps `energy` as the default export price.
 - The TFT backlight is wired permanently on (GPIO22 has no effect), so
   night mode can only dim the image, not switch the backlight off. HDMI
   output is switched off at boot (`hems-hdmi-off`).

@@ -58,7 +58,7 @@ The planner solves this over the whole known price horizon (up to ~44 h after
 | File | Purpose |
 |---|---|
 | `devices.py` | Read P1 meter and SolarFlow over the local API |
-| `tibber.py` | Fetch Tibber 15-min prices, cache in `/var/lib/hems/prices.json`, background refresh |
+| `tibber.py` | Fetch Tibber 15-min prices, cache in `/var/lib/hems/prices.json`, background refresh; price archive `prices-YYYY-MM.csv` with backfill |
 | `display.py` | Status screen: 2x2 Solar/Grid/Battery/Home tiles with energy-flow arrows, weather, price chart (today + tomorrow, coloured by plan), plan, CPU/RAM/disk; dims between sunset and sunrise |
 | `weather.py` | Current temperature + weather code from Open-Meteo (no key), every 15 min |
 | `logger.py` | Samples every 5 s; 15-min energy totals by operating mode plus energy, peak and time above 25 A per phase in `/var/lib/hems/energy-YYYY-MM.csv`. A restart continues the running interval |

@@ -7,7 +7,11 @@ to the device's flash):
   BYPASS     acMode=1, inputLimit=0, outputLimit=0   (solar still charges)
   DISCHARGE  acMode=2 (AC output), inputLimit=0, outputLimit=follows load
 
-DISCHARGE is a zero-export load follower on the P1 total:
+DISCHARGE while net metering lasts (slot "export": true): outputLimit = planned
+W, whatever the house uses; the rest is exported (worth the all-in price).
+No P1 data is needed for that: discharging only lowers the phase current.
+
+DISCHARGE after that is a zero-export load follower on the P1 total:
   house  = grid_now + device_output_now      (independent of command lag)
   output = clamp(house - TARGET_GRID_W, 0, planned W)
 After each change the loop waits WRITE_MIN_INTERVAL_S (device ramp + P1
@@ -15,7 +19,7 @@ delay) before correcting again; changes smaller than DEADBAND_W are skipped.
 
 Safety:
   - plan missing/stale        -> BYPASS
-  - P1 data stale             -> no discharge (output 0)
+  - P1 data stale             -> no zero-export discharge (output 0)
   - CHARGE is limited to the spare capacity on the battery's phase, and
     stops without P1 data (guard.py)
   - SIGTERM / exit            -> BYPASS
@@ -41,21 +45,21 @@ def log(msg):
 
 
 def current_slot():
-    """(mode, planned_w) for now, or ('BYPASS', 0, reason) if no valid plan."""
+    """(mode, planned_w, reason, export) for now; BYPASS if no valid plan."""
     try:
         with open(PLAN_FILE) as f:
             plan = json.load(f)
     except Exception:
-        return "BYPASS", 0, "no plan"
+        return "BYPASS", 0, "no plan", False
     created = datetime.fromisoformat(plan["created"])
     if time.time() - created.timestamp() > C.PLAN_STALE_S:
-        return "BYPASS", 0, "plan stale"
+        return "BYPASS", 0, "plan stale", False
     now = datetime.now().astimezone()
     for s in plan["slots"]:
         start = datetime.fromisoformat(s["start"])
         if start.timestamp() <= now.timestamp() < start.timestamp() + C.SLOT_MIN * 60:
-            return s["mode"], s["power_w"], "plan"
-    return "BYPASS", 0, "slot not in plan"
+            return s["mode"], s["power_w"], "plan", bool(s.get("export"))
+    return "BYPASS", 0, "slot not in plan", False
 
 
 class Executor:
@@ -107,7 +111,7 @@ class Executor:
         self.guard.observe(time.time(), p1["phases_w"][C.BATTERY_PHASE] if p1 else None,
                            p1["msg"] if p1 else None, p["gridInputPower"], p["outputHomePower"])
 
-        mode, planned_w, why = current_slot()
+        mode, planned_w, why, export = current_slot()
         if mode != self.mode:
             log(f"mode {self.mode} -> {mode} ({why}, planned {planned_w} W, SOC {p['electricLevel']}%)")
             self.mode = mode
@@ -121,7 +125,11 @@ class Executor:
 
         elif mode == "DISCHARGE":
             cap = min(planned_w, C.DISCHARGE_MAX_W)
-            if not p1_ok:
+            if export:
+                self.out_cmd = int(cap)
+                self.send({"acMode": 2, "inputLimit": 0, "outputLimit": self.out_cmd},
+                          f"export allowed (saldering), grid {p1['grid_w'] if p1 else '?'} W")
+            elif not p1_ok:
                 self.out_cmd = 0
                 self.send({"acMode": 2, "inputLimit": 0, "outputLimit": 0}, "P1 stale -> no discharge")
             else:
@@ -140,11 +148,12 @@ class Executor:
         else:  # BYPASS
             self.send({"acMode": 1, "inputLimit": 0, "outputLimit": 0}, why)
 
-        self.publish(mode, planned_w, p, p1)
+        self.publish(mode, planned_w, p, p1, export)
 
-    def publish(self, mode, planned_w, p, p1):
+    def publish(self, mode, planned_w, p, p1, export=False):
         state = {
             "ts": time.time(), "dry_run": self.dry, "mode": mode, "planned_w": planned_w,
+            "export": export,
             "commanded": self.sent, "device": {"acMode": p["acMode"], "inputLimit": p["inputLimit"],
                                                "outputLimit": p["outputLimit"], "smartMode": p.get("smartMode")},
             "grid_w": p1["grid_w"] if p1 else None,

@@ -4,13 +4,15 @@
 Every slot (15 min) the battery is in one of three modes:
   CHARGE     charge from the grid
   BYPASS     hold; house runs on grid (solar may still charge)
-  DISCHARGE  self-use: cover house load, never export
+  DISCHARGE  until saldering ends (config SALDERING_UNTIL): planned power,
+             exporting what the house does not use (export is worth the
+             all-in price); after that: self-use, cover house load, never export
 
 The plan is a linear program over all slots with known Tibber prices:
   minimise   sum p_t*c_t  -  sum (p_t - wear)*d_t  -  V_end * (SOC_end - SOC_now)
   subject to SOC_t = SOC_now + sum_{j<=t} (eta_c*c_j - d_j/eta_d)
              MIN_SOC <= SOC_t <= MAX_SOC
-             0 <= c_t <= CHARGE_MAX,  0 <= d_t <= min(DISCHARGE_MAX, house load)
+             0 <= c_t <= CHARGE_MAX,  0 <= d_t <= DISCHARGE_MAX  (min(DISCHARGE_MAX, house load) after saldering)
 (c, d = AC energy per slot in kWh, SOC in kWh at the cells.)
 
 A charge/discharge pair is only chosen when
@@ -49,6 +51,15 @@ def slot_start(t):
     return t.replace(minute=t.minute - t.minute % C.SLOT_MIN, second=0, microsecond=0)
 
 
+SALDERING_END = (datetime.fromisoformat(C.SALDERING_UNTIL).date()
+                 if getattr(C, "SALDERING_UNTIL", None) else None)
+
+
+def export_allowed(start):
+    """True if a slot starting at `start` may export (net metering still on)."""
+    return SALDERING_END is not None and start.date() < SALDERING_END
+
+
 def soc_limits(sf):
     """(min %, max %) from the device, or the config values if missing/implausible."""
     try:
@@ -80,7 +91,9 @@ def make_plan(now, soc_pct, slots, min_soc=C.MIN_SOC, max_soc=C.MAX_SOC):
     frac[0] = max(0.05, 1 - (now - cur).total_seconds() / (C.SLOT_MIN * 60))
 
     c_max = C.CHARGE_MAX_W / 1000 * H * frac
-    d_max = min(C.DISCHARGE_MAX_W, C.HOUSE_LOAD_W) / 1000 * H * frac
+    export = np.array([export_allowed(s[0]) for s in slots])
+    d_max = np.where(export, C.DISCHARGE_MAX_W,
+                     min(C.DISCHARGE_MAX_W, C.HOUSE_LOAD_W)) / 1000 * H * frac
 
     v_end = max(0.0, float(np.quantile(prices, C.END_VALUE_QUANTILE)) * eta_d - wear)
 
@@ -91,7 +104,7 @@ def make_plan(now, soc_pct, slots, min_soc=C.MIN_SOC, max_soc=C.MAX_SOC):
     A_soc = np.hstack([eta_c * L, -L / eta_d])   # SOC_t - e_now
     A_ub = np.vstack([A_soc, -A_soc])
     b_ub = np.concatenate([np.full(n, e_max - e_now), np.full(n, e_now - e_min)])
-    bounds = [(0, c) for c in c_max] + [(0, d) for d in np.broadcast_to(d_max, (n,))]
+    bounds = [(0, c) for c in c_max] + [(0, d) for d in d_max]
 
     res = linprog(cost, A_ub=A_ub, b_ub=b_ub, bounds=bounds, method="highs")
     if not res.success:
@@ -110,7 +123,7 @@ def make_plan(now, soc_pct, slots, min_soc=C.MIN_SOC, max_soc=C.MAX_SOC):
         else:
             mode, power = "BYPASS", 0
         out.append({"start": start.isoformat(), "price": price, "level": level,
-                    "mode": mode, "power_w": power,
+                    "mode": mode, "power_w": power, "export": bool(export[i]),
                     "soc_end": round(100 * soc_kwh[i] / cap, 1)})
 
     grid_saving = float(prices @ d - prices @ c)

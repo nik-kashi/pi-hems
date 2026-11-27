@@ -36,6 +36,11 @@ try:
     from config import EXPORT_PRICE
 except Exception:
     EXPORT_PRICE = "energy"
+try:
+    from config import SALDERING_UNTIL
+except Exception:
+    SALDERING_UNTIL = None
+SALDERING_END = datetime.fromisoformat(SALDERING_UNTIL).date() if SALDERING_UNTIL else None
 
 
 def _load(path):
@@ -89,7 +94,9 @@ def _parse_prices(path):
     with open(path, newline="") as f:
         for r in csv.DictReader(f):
             t, p = datetime.fromisoformat(r["start"]), float(r["total"])
-            if EXPORT_PRICE == "energy":
+            if SALDERING_END and t.date() < SALDERING_END:
+                e = p                               # netted at the all-in price
+            elif EXPORT_PRICE == "energy":
                 e = float(r["energy"]) if r.get("energy") else p
             else:
                 e = float(EXPORT_PRICE)
@@ -150,7 +157,8 @@ def api_history():
         row.update({k: round(a[k] if a else 0.0, 4) for k in keys})
         days.append(row)
     return {"days": days, "wear": WEAR_EUR_PER_KWH,
-            "export_price": "Tibber energy part" if EXPORT_PRICE == "energy" else f"{EXPORT_PRICE} EUR/kWh"}
+            "export_price": (f"the all-in price until {SALDERING_UNTIL} (saldering), then " if SALDERING_END else "")
+                            + ("Tibber energy part" if EXPORT_PRICE == "energy" else f"{EXPORT_PRICE} EUR/kWh")}
 
 
 def _local_client(addr):

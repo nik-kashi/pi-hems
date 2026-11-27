@@ -42,7 +42,7 @@ Each 15-minute slot gets one mode:
 |---|---|
 | CHARGE | charge from the grid |
 | BYPASS | hold; house runs on grid (solar may still charge) |
-| DISCHARGE | self-use, cover house load, never export |
+| DISCHARGE | until saldering ends (`SALDERING_UNTIL`, 2027-01-01): planned power (up to 1600 W), exporting what the house does not use; after that: self-use, cover house load, never export |
 
 A charge/discharge pair is only worth it when
 
@@ -65,8 +65,8 @@ The planner solves this over the whole known price horizon (up to ~44 h after
 | `config.py` | All tunables: device IPs, battery capacity/limits, efficiencies, wear cost, shadow mode |
 | `planner.py` | Linear-program battery plan over all known 15-min prices: CHARGE / BYPASS / DISCHARGE per slot; `hems-plan` prints it |
 | `guard.py` | Fuse guard: limits grid charging to the spare capacity on the battery's phase (L3, 24 A of 25 A); no P1 data = no grid charging |
-| `executor.py` | Turns the current plan slot into SolarFlow commands (`acMode`, `inputLimit`, `outputLimit`, always `smartMode=1`); zero-export load follower while discharging; dry-run by default |
-| `web.py` + `web/index.html` | Read-only web page on port 80 (`http://hems.home/` via the router DNS, or `http://hems.local/`): energy flow, prices + plan, executor, system; JSON at `/api/state`. Clicking the price chart opens the price history (14 d / 30 d / 90 d / 1 year by month): kWh in (grid charging, solar) and out (used in house, exported), average prices, and profit = saved (battery/solar used in the house × full price) + earned (export × export price, `EXPORT_PRICE` in config) − grid charging − battery wear; JSON at `/api/history` |
+| `executor.py` | Turns the current plan slot into SolarFlow commands (`acMode`, `inputLimit`, `outputLimit`, always `smartMode=1`); while discharging: fixed planned output during saldering, zero-export load follower after it; dry-run by default |
+| `web.py` + `web/index.html` | Read-only web page on port 80 (`http://hems.home/` via the router DNS, or `http://hems.local/`): energy flow, prices + plan, executor, system; JSON at `/api/state`. Clicking the price chart opens the price history (14 d / 30 d / 90 d / 1 year by month): kWh in (grid charging, solar) and out (used in house, exported), average prices, and profit = saved (battery/solar used in the house × full price) + earned (export × all-in price during saldering, then × `EXPORT_PRICE` from config) − grid charging − battery wear; JSON at `/api/history` |
 | `report.py` | `hems-report [YYYY-MM-DD]`: measured charge/discharge efficiency, round trip, standby drain |
 
 ## Setup
